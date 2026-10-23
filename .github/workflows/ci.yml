@@ -1,4 +1,4 @@
-name: Finite Windows relay attribution
+name: Finite full-context Windows relay attribution
 on:
   workflow_dispatch:
 permissions:
@@ -7,10 +7,7 @@ jobs:
   compare:
     if: github.repository == 'openclaw/mcporter' && startsWith(github.ref_name, 'validation/emudhra-windows-')
     runs-on: windows-latest
-    timeout-minutes: 20
-    env:
-      FIRECRAWL_API_KEY: test
-      LINEAR_API_KEY: test
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -23,7 +20,7 @@ jobs:
           path: base
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: f8562089b3f8ba862b46b7297dd09d72a4cd06f3
+          ref: b1b15e90d8afb6cbbc2a7ed90ec5e799f68eb57f
           persist-credentials: false
           path: candidate
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
@@ -54,7 +51,7 @@ jobs:
               if ($LASTEXITCODE -ne 0) { throw "frozen install failed for $revision" }
             } finally { Pop-Location }
           }
-      - name: Run fixed A B B A comparison without changing test deadlines
+      - name: Run budgeted A B full CI context without changing test deadlines
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -65,7 +62,7 @@ jobs:
           Get-FileHash $observer -Algorithm SHA256 | Format-List | Out-File "$evidence/observer.txt"
           $rows = @()
           $index = 0
-          foreach ($revision in @('base', 'candidate', 'candidate', 'base')) {
+          foreach ($revision in @('base', 'candidate')) {
             $index++
             $label = "$index-$revision"
             $temp = Join-Path $env:RUNNER_TEMP "mcporter-temp-$label"
@@ -76,10 +73,22 @@ jobs:
               $env:TEMP = $temp
               $env:TMP = $temp
               $env:TMPDIR = $temp
+              Remove-Item Env:FIRECRAWL_API_KEY -ErrorAction SilentlyContinue
+              Remove-Item Env:LINEAR_API_KEY -ErrorAction SilentlyContinue
+              $checkStart = Get-Date
+              pnpm check *> "$evidence/$label-check.log"
+              $checkCode = $LASTEXITCODE
+              if ($checkCode -ne 0) {
+                $rows += [pscustomobject]@{ label=$label; revision=$revision; exit=$checkCode; phase='precheck-failed'; started=$checkStart.ToUniversalTime().ToString('o'); elapsedSeconds=((Get-Date)-$checkStart).TotalSeconds }
+                $rows | ConvertTo-Json | Set-Content "$evidence/results.json"
+                continue
+              }
+              $env:FIRECRAWL_API_KEY = 'test'
+              $env:LINEAR_API_KEY = 'test'
               $env:MCPORTER_PROOF_DIAGNOSTICS = "$evidence/$label-powershell.jsonl"
               $env:NODE_OPTIONS = "--import=$observerUrl"
               $start = Get-Date
-              pnpm test --maxWorkers=1 tests/runtime-chrome-relay-handoff.test.ts *> "$evidence/$label-test.log"
+              pnpm test --maxWorkers=1 *> "$evidence/$label-test.log"
               $code = $LASTEXITCODE
               $rows += [pscustomobject]@{ label=$label; revision=$revision; exit=$code; started=$start.ToUniversalTime().ToString('o'); elapsedSeconds=((Get-Date)-$start).TotalSeconds }
               $rows | ConvertTo-Json | Set-Content "$evidence/results.json"

@@ -11,12 +11,14 @@ childProcess.spawnSync = function (...args) {
     return original.apply(this, args);
   }
   const start = performance.now();
-  record({ phase: 'powershell-begin', node: process.version, pid: process.pid, at: new Date().toISOString() });
+  const caller = /runtime-chrome-relay-handoff\.test\.ts:(\d+):\d+/u.exec(new Error().stack ?? '');
+  const targetTestLine = caller ? Number(caller[1]) : null;
+  record({ phase: 'powershell-begin', targetTestLine, node: process.version, pid: process.pid, at: new Date().toISOString() });
   const result = original.apply(this, args);
   const raw = typeof result.stderr === 'string' ? result.stderr.trim() : '';
-  record({ phase: 'powershell-end', pid: process.pid, elapsedMs: performance.now() - start,
+  record({ phase: 'powershell-end', targetTestLine, pid: process.pid, elapsedMs: performance.now() - start,
     status: result.status, signal: result.signal, errorCode: result.error?.code ?? null,
-    safeStage: /^[A-Za-z0-9_.:=\- ]{1,240}$/u.test(raw) ? raw : null });
+    safeStage: /^stage=(?:identity|descriptor|create|acl-read|acl-verify) type=System\.[A-Za-z0-9_.]+ hresult=0x[0-9A-Fa-f]{8}$/u.test(raw) ? raw : null });
   return result;
 };
 syncBuiltinESMExports();
