@@ -1,127 +1,99 @@
-name: CI
-
+name: Finite Windows relay attribution
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
   workflow_dispatch:
-
 permissions:
   contents: read
-
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
 jobs:
-  build:
-    name: build (${{ matrix.label }})
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { os: ubuntu-latest, node: '24.22.1', label: ubuntu-latest }
-          - { os: xcode-27, node: '24.22.1', label: xcode-27 }
-          - { os: windows-latest, node: '24.22.1', label: windows-latest }
-          - { os: ubuntu-latest, node: '26.12.1', label: 'ubuntu-latest, Node 26' }
-    runs-on: ${{ matrix.os }}
+  compare:
+    if: github.repository == 'openclaw/mcporter' && startsWith(github.ref_name, 'validation/emudhra-windows-')
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      FIRECRAWL_API_KEY: test
+      LINEAR_API_KEY: test
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          node-version: ${{ matrix.node }}
-
-      - run: corepack enable
-
-      - name: Locate pnpm store
-        id: pnpm-store
-        shell: bash
-        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+          persist-credentials: false
+          path: proof
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          path: ${{ steps.pnpm-store.outputs.path }}
-          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-
-
-      - run: pnpm install --frozen-lockfile --engine-strict
-      - run: pnpm --version
-      - run: pnpm check
-        if: runner.os != 'macOS'
-
-      # Type-aware oxlint (tsgolint) crashes on macOS runners; ubuntu and windows
-      # still run the full `pnpm check`, so the rule set stays enforced.
-      - name: Check without type-aware oxlint
-        if: runner.os == 'macOS'
-        run: pnpm format:check && pnpm typecheck
-
-      - name: Verify release contracts without credentials
-        if: runner.os == 'macOS'
-        run: ./scripts/test-release.sh
-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        if: runner.os == 'macOS'
+          ref: 5f9eee19b4216359e5937032705f7ce274b2ef4d
+          persist-credentials: false
+          path: base
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          bun-version: 1.4.4
-
-      - name: Smoke-test both native release targets
-        if: runner.os == 'macOS'
+          ref: f8562089b3f8ba862b46b7297dd09d72a4cd06f3
+          persist-credentials: false
+          path: candidate
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24.22.1
+      - name: Admit native runtime and prepare independent frozen inputs
+        shell: pwsh
         run: |
-          ./scripts/smoke-native.sh bun-darwin-arm64 arm64 "$RUNNER_TEMP"
-          ./scripts/smoke-native.sh bun-darwin-x64-baseline x86_64 "$RUNNER_TEMP"
-
-      - name: Verify generated schema is committed
-        if: matrix.os == 'ubuntu-latest' && matrix.node == '24.22.1'
-        shell: bash
+          $ErrorActionPreference = 'Stop'
+          $evidence = Join-Path $env:RUNNER_TEMP 'mcporter-proof'
+          New-Item -ItemType Directory -Path $evidence | Out-Null
+          node -e "if(process.version !== 'v24.22.1' || process.platform !== 'win32' || process.arch !== 'x64') process.exit(1)"
+          if ($LASTEXITCODE -ne 0) { throw 'native Node admission failed' }
+          $node = node -p process.execPath
+          Get-FileHash $node -Algorithm SHA256 | Format-List | Out-File "$evidence/runtime.txt"
+          node --version | Out-File -Append "$evidence/runtime.txt"
+          corepack enable
+          if ($LASTEXITCODE -ne 0) { throw 'Corepack setup failed' }
+          foreach ($revision in @('base', 'candidate')) {
+            Push-Location (Join-Path $env:GITHUB_WORKSPACE $revision)
+            try {
+              $env:COREPACK_HOME = Join-Path $env:RUNNER_TEMP "corepack-$revision"
+              git rev-parse HEAD | Out-File "$evidence/$revision-head.txt"
+              Get-FileHash package.json,pnpm-lock.yaml,tests/runtime-chrome-relay-handoff.test.ts,src/chrome-devtools-relay-handoff.ts -Algorithm SHA256 | Format-List | Out-File "$evidence/$revision-inputs.txt"
+              pnpm --version | Out-File "$evidence/$revision-pnpm.txt"
+              if ($LASTEXITCODE -ne 0) { throw 'selected package manager failed' }
+              pnpm install --frozen-lockfile --engine-strict --store-dir "$env:RUNNER_TEMP/pnpm-$revision" *> "$evidence/$revision-install.log"
+              if ($LASTEXITCODE -ne 0) { throw "frozen install failed for $revision" }
+            } finally { Pop-Location }
+          }
+      - name: Run fixed A B B A comparison without changing test deadlines
+        shell: pwsh
         run: |
-          pnpm generate:schema
-          pnpm exec oxfmt mcporter.schema.json
-          git diff --exit-code -- mcporter.schema.json
-
-      - name: Build docs site
-        if: matrix.os == 'ubuntu-latest' && matrix.node == '24.22.1'
-        run: pnpm docs:site
-
-      # WMI process queries share one machine-wide provider across test files.
-      # Serialize Windows files; each regression retains its full internal process concurrency.
-      - run: pnpm test ${{ matrix.os == 'windows-latest' && '--maxWorkers=1' || '' }}
-        if: matrix.os != 'ubuntu-latest' || matrix.node == '26.12.1'
-        env:
-          FIRECRAWL_API_KEY: test
-          LINEAR_API_KEY: test
-
-      # Coverage runs on Ubuntu/Node 24; every other matrix entry runs the same
-      # full suite without instrumentation. Keep the coverage ratchet unchanged.
-      - name: Test with coverage
-        if: matrix.os == 'ubuntu-latest' && matrix.node == '24.22.1'
-        run: pnpm test:coverage
-        env:
-          FIRECRAWL_API_KEY: test
-          LINEAR_API_KEY: test
-
-      - name: Summarize coverage
-        if: matrix.os == 'ubuntu-latest' && matrix.node == '24.22.1' && always()
-        shell: bash
-        run: |
-          if [ -f coverage/coverage-summary.json ]; then
-            node scripts/coverage-summary.mjs >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "No coverage summary produced." >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-      - name: Verify installed npm artifact
-        if: matrix.os == 'ubuntu-latest' && matrix.node == '24.22.1'
-        run: pnpm test:package
-
-      - name: Upload coverage report
-        if: matrix.os == 'ubuntu-latest' && matrix.node == '24.22.1' && always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $evidence = Join-Path $env:RUNNER_TEMP 'mcporter-proof'
+          $observer = Join-Path $env:GITHUB_WORKSPACE 'proof/scripts/trace-powershell.mjs'
+          $observerUrl = node --input-type=module -e "import {pathToFileURL} from 'node:url'; console.log(pathToFileURL(process.argv[1]).href)" $observer
+          Get-FileHash $observer -Algorithm SHA256 | Format-List | Out-File "$evidence/observer.txt"
+          $rows = @()
+          $index = 0
+          foreach ($revision in @('base', 'candidate', 'candidate', 'base')) {
+            $index++
+            $label = "$index-$revision"
+            $temp = Join-Path $env:RUNNER_TEMP "mcporter-temp-$label"
+            New-Item -ItemType Directory -Path $temp | Out-Null
+            Push-Location (Join-Path $env:GITHUB_WORKSPACE $revision)
+            try {
+              $env:COREPACK_HOME = Join-Path $env:RUNNER_TEMP "corepack-$revision"
+              $env:TEMP = $temp
+              $env:TMP = $temp
+              $env:TMPDIR = $temp
+              $env:MCPORTER_PROOF_DIAGNOSTICS = "$evidence/$label-powershell.jsonl"
+              $env:NODE_OPTIONS = "--import=$observerUrl"
+              $start = Get-Date
+              pnpm test --maxWorkers=1 tests/runtime-chrome-relay-handoff.test.ts *> "$evidence/$label-test.log"
+              $code = $LASTEXITCODE
+              $rows += [pscustomobject]@{ label=$label; revision=$revision; exit=$code; started=$start.ToUniversalTime().ToString('o'); elapsedSeconds=((Get-Date)-$start).TotalSeconds }
+              $rows | ConvertTo-Json | Set-Content "$evidence/results.json"
+            } finally {
+              Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue
+              Pop-Location
+            }
+          }
+          if (@($rows | Where-Object { $_.exit -ne 0 }).Count -gt 0) { throw 'At least one unchanged-deadline comparison failed; inspect retained evidence.' }
+      - name: Preserve finite comparison evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: coverage
-          path: coverage/
+          name: mcporter-windows-paired-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/mcporter-proof
+          if-no-files-found: error
           retention-days: 14
-          if-no-files-found: ignore
