@@ -1,108 +1,53 @@
-name: Finite full-context Windows relay attribution
+name: Finite native Windows Bun metadata validation
 on:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  compare:
+  metadata:
     if: github.repository == 'openclaw/mcporter' && startsWith(github.ref_name, 'validation/emudhra-windows-')
     runs-on: windows-latest
-    timeout-minutes: 35
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-          path: proof
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: 5f9eee19b4216359e5937032705f7ce274b2ef4d
-          persist-credentials: false
-          path: base
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: b1b15e90d8afb6cbbc2a7ed90ec5e799f68eb57f
-          persist-credentials: false
-          path: candidate
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 24.22.1
-      - name: Admit native runtime and prepare independent frozen inputs
+      - name: Admit exact official Windows Bun and owning module
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $evidence = Join-Path $env:RUNNER_TEMP 'mcporter-proof'
-          New-Item -ItemType Directory -Path $evidence | Out-Null
-          node -e "if(process.version !== 'v24.22.1' || process.platform !== 'win32' || process.arch !== 'x64') process.exit(1)"
-          if ($LASTEXITCODE -ne 0) { throw 'native Node admission failed' }
-          $node = node -p process.execPath
-          Get-FileHash $node -Algorithm SHA256 | Format-List | Out-File "$evidence/runtime.txt"
-          node --version | Out-File -Append "$evidence/runtime.txt"
-          corepack enable
-          if ($LASTEXITCODE -ne 0) { throw 'Corepack setup failed' }
-          foreach ($revision in @('base', 'candidate')) {
-            Push-Location (Join-Path $env:GITHUB_WORKSPACE $revision)
-            try {
-              $env:COREPACK_HOME = Join-Path $env:RUNNER_TEMP "corepack-$revision"
-              git rev-parse HEAD | Out-File "$evidence/$revision-head.txt"
-              Get-FileHash package.json,pnpm-lock.yaml,tests/runtime-chrome-relay-handoff.test.ts,src/chrome-devtools-relay-handoff.ts -Algorithm SHA256 | Format-List | Out-File "$evidence/$revision-inputs.txt"
-              pnpm --version | Out-File "$evidence/$revision-pnpm.txt"
-              if ($LASTEXITCODE -ne 0) { throw 'selected package manager failed' }
-              pnpm install --frozen-lockfile --engine-strict --store-dir "$env:RUNNER_TEMP/pnpm-$revision" *> "$evidence/$revision-install.log"
-              if ($LASTEXITCODE -ne 0) { throw "frozen install failed for $revision" }
-            } finally { Pop-Location }
-          }
-      - name: Run budgeted A B full CI context without changing test deadlines
+          $root = Join-Path $env:RUNNER_TEMP 'mcporter-bun-metadata'
+          $proof = Join-Path $root 'evidence'
+          New-Item -ItemType Directory -Path $proof | Out-Null
+          $archive = Join-Path $root 'bun.zip'
+          Invoke-WebRequest -Uri 'https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-windows-x64-baseline.zip' -OutFile $archive
+          $archiveHash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($archiveHash -ne '0f20ce6674d4f2dbcc8c5d59fdf99f7ba45f8c3b367e0f5781cbfa30a1c78d99') { throw 'Official Bun archive identity mismatch' }
+          $moduleHash = (Get-FileHash 'scripts/campaign-runtime.ts' -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($moduleHash -ne '98a9b7f0340875f10dfde34559a4a9e4248b8287dec18c77be8163dc49edd82f') { throw 'Reviewed owner module identity mismatch' }
+          Expand-Archive -Path $archive -DestinationPath (Join-Path $root 'bun')
+          $bun = Join-Path $root 'bun/bun-windows-x64-baseline/bun.exe'
+          $inputs = [ordered]@{ sourceHead=(git rev-parse HEAD); node=(node --version); nodeSHA256=(Get-FileHash (node -p process.execPath) -Algorithm SHA256).Hash.ToLowerInvariant(); archiveSHA256=$archiveHash; bunSHA256=(Get-FileHash $bun -Algorithm SHA256).Hash.ToLowerInvariant(); ownerModuleSHA256=$moduleHash; runnerImage=$env:ImageVersion; runnerOS=$env:RUNNER_OS; runnerArch=$env:RUNNER_ARCH }
+          $inputs | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $proof 'INPUTS.json')
+      - name: Exercise real metadata owner without project or global preloads
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $false
-          $evidence = Join-Path $env:RUNNER_TEMP 'mcporter-proof'
-          $observer = Join-Path $env:GITHUB_WORKSPACE 'proof/scripts/trace-powershell.mjs'
-          $observerUrl = node --input-type=module -e "import {pathToFileURL} from 'node:url'; console.log(pathToFileURL(process.argv[1]).href)" $observer
-          Get-FileHash $observer -Algorithm SHA256 | Format-List | Out-File "$evidence/observer.txt"
-          $rows = @()
-          $index = 0
-          foreach ($revision in @('base', 'candidate')) {
-            $index++
-            $label = "$index-$revision"
-            $temp = Join-Path $env:RUNNER_TEMP "mcporter-temp-$label"
-            New-Item -ItemType Directory -Path $temp | Out-Null
-            Push-Location (Join-Path $env:GITHUB_WORKSPACE $revision)
-            try {
-              $env:COREPACK_HOME = Join-Path $env:RUNNER_TEMP "corepack-$revision"
-              $env:TEMP = $temp
-              $env:TMP = $temp
-              $env:TMPDIR = $temp
-              Remove-Item Env:FIRECRAWL_API_KEY -ErrorAction SilentlyContinue
-              Remove-Item Env:LINEAR_API_KEY -ErrorAction SilentlyContinue
-              $checkStart = Get-Date
-              pnpm check *> "$evidence/$label-check.log"
-              $checkCode = $LASTEXITCODE
-              if ($checkCode -ne 0) {
-                $rows += [pscustomobject]@{ label=$label; revision=$revision; exit=$checkCode; phase='precheck-failed'; started=$checkStart.ToUniversalTime().ToString('o'); elapsedSeconds=((Get-Date)-$checkStart).TotalSeconds }
-                $rows | ConvertTo-Json | Set-Content "$evidence/results.json"
-                continue
-              }
-              $env:FIRECRAWL_API_KEY = 'test'
-              $env:LINEAR_API_KEY = 'test'
-              $env:MCPORTER_PROOF_DIAGNOSTICS = "$evidence/$label-powershell.jsonl"
-              $env:NODE_OPTIONS = "--import=$observerUrl"
-              $start = Get-Date
-              pnpm test --maxWorkers=1 *> "$evidence/$label-test.log"
-              $code = $LASTEXITCODE
-              $rows += [pscustomobject]@{ label=$label; revision=$revision; exit=$code; started=$start.ToUniversalTime().ToString('o'); elapsedSeconds=((Get-Date)-$start).TotalSeconds }
-              $rows | ConvertTo-Json | Set-Content "$evidence/results.json"
-            } finally {
-              Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue
-              Pop-Location
-            }
-          }
-          if (@($rows | Where-Object { $_.exit -ne 0 }).Count -gt 0) { throw 'At least one unchanged-deadline comparison failed; inspect retained evidence.' }
-      - name: Preserve finite comparison evidence
+          $root = Join-Path $env:RUNNER_TEMP 'mcporter-bun-metadata'
+          $proof = Join-Path $root 'evidence'
+          $bun = Join-Path $root 'bun/bun-windows-x64-baseline/bun.exe'
+          node scripts/campaign-bun-metadata-proof.mjs $proof $bun *> (Join-Path $proof 'owner-proof.log')
+          if ($LASTEXITCODE -ne 0) { throw 'Native Windows metadata proof failed; inspect retained diagnostics' }
+          Get-Content (Join-Path $proof 'RESULTS.json')
+      - name: Preserve bounded native evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: mcporter-windows-paired-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/mcporter-proof
+          name: mcporter-windows-bun-metadata-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/mcporter-bun-metadata/evidence
           if-no-files-found: error
           retention-days: 14
