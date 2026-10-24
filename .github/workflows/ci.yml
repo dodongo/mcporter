@@ -1,53 +1,105 @@
-name: Finite native Windows Bun metadata validation
+name: Finite native product artifact and Intel comparison
 on:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  metadata:
-    if: github.repository == 'openclaw/mcporter' && startsWith(github.ref_name, 'validation/emudhra-windows-')
-    runs-on: windows-latest
-    timeout-minutes: 10
+  artifacts:
+    if: github.repository == 'openclaw/mcporter' && github.ref_name == 'validation/emudhra-windows-20261023'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, xcode-27]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 4307fdcc994c16f9a021e97cd5d6ea004275e051
+          path: candidate
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 24.22.1
-      - name: Admit exact official Windows Bun and owning module
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $root = Join-Path $env:RUNNER_TEMP 'mcporter-bun-metadata'
-          $proof = Join-Path $root 'evidence'
-          New-Item -ItemType Directory -Path $proof | Out-Null
-          $archive = Join-Path $root 'bun.zip'
-          Invoke-WebRequest -Uri 'https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-windows-x64-baseline.zip' -OutFile $archive
-          $archiveHash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($archiveHash -ne '0f20ce6674d4f2dbcc8c5d59fdf99f7ba45f8c3b367e0f5781cbfa30a1c78d99') { throw 'Official Bun archive identity mismatch' }
-          $moduleHash = (Get-FileHash 'scripts/campaign-runtime.ts' -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($moduleHash -ne '98a9b7f0340875f10dfde34559a4a9e4248b8287dec18c77be8163dc49edd82f') { throw 'Reviewed owner module identity mismatch' }
-          Expand-Archive -Path $archive -DestinationPath (Join-Path $root 'bun')
-          $bun = Join-Path $root 'bun/bun-windows-x64-baseline/bun.exe'
-          $inputs = [ordered]@{ sourceHead=(git rev-parse HEAD); node=(node --version); nodeSHA256=(Get-FileHash (node -p process.execPath) -Algorithm SHA256).Hash.ToLowerInvariant(); archiveSHA256=$archiveHash; bunSHA256=(Get-FileHash $bun -Algorithm SHA256).Hash.ToLowerInvariant(); ownerModuleSHA256=$moduleHash; runnerImage=$env:ImageVersion; runnerOS=$env:RUNNER_OS; runnerArch=$env:RUNNER_ARCH }
-          $inputs | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $proof 'INPUTS.json')
-      - name: Exercise real metadata owner without project or global preloads
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $false
-          $root = Join-Path $env:RUNNER_TEMP 'mcporter-bun-metadata'
-          $proof = Join-Path $root 'evidence'
-          $bun = Join-Path $root 'bun/bun-windows-x64-baseline/bun.exe'
-          node scripts/campaign-bun-metadata-proof.mjs $proof $bun *> (Join-Path $proof 'owner-proof.log')
-          if ($LASTEXITCODE -ne 0) { throw 'Native Windows metadata proof failed; inspect retained diagnostics' }
-          Get-Content (Join-Path $proof 'RESULTS.json')
-      - name: Preserve bounded native evidence
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+          package-manager-cache: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
         with:
-          name: mcporter-windows-bun-metadata-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/mcporter-bun-metadata/evidence
+          version: 10.34.6
+          run_install: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: 1.4.4
+      - name: Frozen source install and build
+        working-directory: candidate
+        run: |
+          pnpm install --frozen-lockfile --engine-strict
+          pnpm build
+      - name: Exercise installed package, generated clients and native TLS
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then
+            python harness/scripts/campaign-native-artifacts.py candidate "$RUNNER_TEMP/mcporter-native-proof"
+          else
+            python3 harness/scripts/campaign-native-artifacts.py candidate "$RUNNER_TEMP/mcporter-native-proof"
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: mcporter-native-${{ runner.os }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/mcporter-native-proof/evidence
+          if-no-files-found: error
+          retention-days: 14
+  proc-intel:
+    if: github.repository == 'openclaw/mcporter' && github.ref_name == 'validation/emudhra-windows-20261023'
+    runs-on: macos-26-intel
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: openclaw/proc-safe
+          ref: 36eb601e55e5f00928412ac5877d5b57f4bd0fca
+          path: base
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: openclaw/proc-safe
+          ref: c782265e6141a1efee6fca2b0c6feb4d7291422c
+          path: candidate
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.23.1
+          package-manager-cache: false
+      - name: Record old runtime
+        run: echo "PAIR_OLD_NODE=$(command -v node)" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.23.4
+          package-manager-cache: false
+      - name: Record current runtime and resources
+        run: |
+          echo "PAIR_NEW_NODE=$(command -v node)" >> "$GITHUB_ENV"
+          sysctl hw.logicalcpu hw.memsize
+          df -h "$RUNNER_TEMP"
+          uname -m
+      - name: Compare full original suites and direct child entry point
+        run: python3 harness/scripts/campaign-proc-pair.py base candidate "$RUNNER_TEMP/proc-intel-proof"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: proc-intel-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/proc-intel-proof/IDENTITIES.json
+            ${{ runner.temp }}/proc-intel-proof/RESULTS.json
+            ${{ runner.temp }}/proc-intel-proof/*.stdout
+            ${{ runner.temp }}/proc-intel-proof/*.stderr
           if-no-files-found: error
           retention-days: 14
