@@ -1,11 +1,16 @@
 name: Finite native product artifact and Intel comparison
 on:
   workflow_dispatch:
+    inputs:
+      target:
+        type: choice
+        default: all
+        options: [all, artifacts, proc-intel]
 permissions:
   contents: read
 jobs:
   artifacts:
-    if: github.repository == 'openclaw/mcporter' && github.ref_name == 'validation/emudhra-windows-20261023'
+    if: github.repository == 'openclaw/mcporter' && github.ref_name == 'validation/emudhra-windows-20261023' && inputs.target != 'proc-intel'
     strategy:
       fail-fast: false
       matrix:
@@ -54,7 +59,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   proc-intel:
-    if: github.repository == 'openclaw/mcporter' && github.ref_name == 'validation/emudhra-windows-20261023'
+    if: github.repository == 'openclaw/mcporter' && github.ref_name == 'validation/emudhra-windows-20261023' && inputs.target != 'artifacts'
     runs-on: macos-26-intel
     timeout-minutes: 35
     steps:

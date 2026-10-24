@@ -141,8 +141,11 @@ threading.Thread(target=server.serve_forever, daemon=True).start()
 url = "https://127.0.0.1:" + str(server.server_port) + "/mcp"
 trusted = {"NODE_EXTRA_CA_CERTS": str(cert)}
 try:
-    negative = run("installed-private-untrusted", [node, cli, "list", url, "--json", "--exit-code", "--no-oauth", "--timeout", "10000"])
-    assert negative[0] != 0 and "cert" in (negative[1] + negative[2]).lower() and not requests
+    # The product deliberately summarizes fetch failures. Observe the real verifier
+    # boundary to distinguish a rejected issuer from DNS, refusal, or setup failure.
+    observer = Path(__file__).with_name("campaign-tls-observer.mjs").as_uri()
+    negative = run("installed-private-untrusted", [node, cli, "list", url, "--json", "--exit-code", "--no-oauth", "--timeout", "10000"], extra={"NODE_OPTIONS": "--import=" + observer})
+    assert negative[0] != 0 and any(code in negative[2] for code in ["DEPTH_ZERO_SELF_SIGNED_CERT", "SELF_SIGNED_CERT_IN_CHAIN", "UNABLE_TO_VERIFY_LEAF_SIGNATURE"]) and not requests
     positive = ok("installed-private-trusted", [node, cli, "list", url, "--json", "--exit-code", "--no-oauth", "--timeout", "10000"], extra=trusted)
     assert "ping" in positive[1] and any(row["method"] == "tools/list" for row in requests)
     for kind in ["node", "bun"]:

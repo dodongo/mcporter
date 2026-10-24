@@ -45,7 +45,7 @@ for label in repos:
 
 def run(label, command, source, runtime, timeout=300):
     state = states[source]
-    environment = {**common, "PATH": str(nodes[runtime].parent) + os.pathsep + common["PATH"],
+    environment = {**common, "PATH": str(nodes[runtime].parent) + os.pathsep + str(state / "tools/node_modules/.bin") + os.pathsep + common["PATH"],
                    "HOME": str(state / "home"), "CARGO_HOME": str(state / "cargo-home"), "CARGO_TARGET_DIR": str(repos[source] / "target"),
                    "npm_config_cache": str(state / "npm-cache"), "npm_config_manage_package_manager_versions": "false"}
     began = time.monotonic()
@@ -69,7 +69,7 @@ assert npm.is_file(), "Selected Node installation has no expected npm CLI; setup
 for label in repos:
     pm_version = json.loads((repos[label] / "package.json").read_text())["packageManager"]
     assert run(label + "-prepare-pnpm", [nodes["new"], npm, "install", "--ignore-scripts", "--no-audit", "--no-fund", "--prefix", states[label] / "tools", pm_version], label, "new") == 0
-    pnpm[label] = states[label] / "tools/node_modules/pnpm/bin/pnpm.cjs"
+    pnpm[label] = states[label] / "tools/node_modules/pnpm/bin/pnpm.mjs"
     assert pnpm[label].is_file(), "unexpected pnpm entry point; setup is not a product verdict"
     intended = "old" if label == "base" else "new"
     for name, args in [("install", ["install", "--frozen-lockfile", "--store-dir", str(states[label] / "store")]),
@@ -81,6 +81,7 @@ for label in repos:
 # One runner, sequential full original suites, separate source homes/stores/native targets.
 # Defaults retain original file parallelism, 5000ms outer test deadline and 10000ms child deadline.
 for source, runtime in [("base", "old"), ("candidate", "new"), ("base", "new"), ("candidate", "old")]:
+    assert run(source + "-" + runtime + "-selected-node", [nodes[runtime], pnpm[source], "exec", "node", "-p", "JSON.stringify({version:process.version,executable:process.execPath,arch:process.arch})"], source, runtime) == 0
     run(source + "-" + runtime + "-full", [nodes[runtime], pnpm[source], "test"], source, runtime)
 # Named attribution unknown: determine actual census-child wall cost separately from outer suite.
 # This preserves every child assertion and its fixture; it does not turn a replay into a repair.
