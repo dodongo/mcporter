@@ -231,7 +231,7 @@ export async function handleList(runtime: Runtime, args: string[]): Promise<void
           process.exitCode = 1;
           return;
         }
-        const instructions = await loadServerInstructions(runtime, target);
+        const instructions = await loadServerInstructions(runtime, target, flags.disableOAuth);
         const connectionInfo = flags.verbose ? await loadConnectionInfo(runtime, target) : undefined;
         const payload = {
           mode: 'server',
@@ -308,7 +308,7 @@ export async function handleList(runtime: Runtime, args: string[]): Promise<void
       if (flags.quiet) {
         return;
       }
-      const instructions = await loadServerInstructions(runtime, target);
+      const instructions = await loadServerInstructions(runtime, target, flags.disableOAuth);
       const connectionInfo = flags.verbose ? await loadConnectionInfo(runtime, target) : undefined;
       const summaryLine = printSingleServerHeader(
         definition,
@@ -623,11 +623,20 @@ function printMissingToolJson(
   process.exitCode = 1;
 }
 
-async function loadServerInstructions(runtime: Runtime, serverName: string): Promise<string | undefined> {
-  if (typeof runtime.getInstructions !== 'function') {
-    return undefined;
+async function loadServerInstructions(
+  runtime: Runtime,
+  serverName: string,
+  disableOAuth: boolean | undefined
+): Promise<string | undefined> {
+  if (runtime.getServerMetadata) {
+    const metadata = await runtime.getServerMetadata(serverName, {
+      autoAuthorize: false,
+      allowCachedAuth: true,
+      disableOAuth,
+    });
+    return metadata.instructions;
   }
-  return runtime.getInstructions(serverName);
+  return runtime.getInstructions?.(serverName);
 }
 
 async function loadConnectionInfo(runtime: Runtime, serverName: string) {

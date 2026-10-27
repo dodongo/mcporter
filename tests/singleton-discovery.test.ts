@@ -8,6 +8,7 @@ import { fetchTools } from '../src/cli/generate/definition.js';
 import { createRuntime } from '../src/runtime.js';
 import { createGeneratedKeepAliveRuntime } from '../src/generated-daemon-runtime.js';
 import { generateCli } from '../src/generate-cli.js';
+import { handleList } from '../src/cli/list-command.js';
 
 // Discovery keeps real MCP children; Windows ownership checks have separate CLI integration coverage.
 vi.mock('../src/daemon/process-retirement.js', async (importOriginal) => {
@@ -59,6 +60,20 @@ it('uses one exclusive generic child for listing, automatic descriptions, genera
     expect(f.host.status().servers).toHaveLength(1);
     await Promise.all([client.release(), limited.release()]);
   } finally {
+    await f.close();
+  }
+});
+
+it('lists a keep-alive server with the instructions its daemon connection reports', async () => {
+  const f = await singletonFixture();
+  const context = await createGeneratedKeepAliveRuntime(await createRuntime({ servers: [f.definition] }), f.definition);
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  try {
+    await handleList(context.runtime, ['fixture', '--json']);
+    expect(JSON.parse(String(log.mock.calls.at(-1)?.[0])).instructions).toBe('Operate the synthetic fixture.');
+  } finally {
+    log.mockRestore();
+    await context.close();
     await f.close();
   }
 });
