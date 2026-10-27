@@ -109,9 +109,12 @@ export class DaemonBroker {
     view.lastUsed = Date.now();
     return view;
   }
-  async invokeWithNotices(request: DaemonRequest): Promise<{ result: unknown; notices: string[] }> {
+  async invokeWithNotices(
+    request: DaemonRequest,
+    signal?: AbortSignal
+  ): Promise<{ result: unknown; notices: string[] }> {
     const messages = new Set<string>();
-    const result = await notices.run(messages, () => this.invoke(request));
+    const result = await notices.run(messages, () => this.invoke(request, signal));
     return { result, notices: [...messages] };
   }
   private makeRuntime(definition: ServerDefinition, clientInfo: { name: string; version: string }): Promise<Runtime> {
@@ -127,7 +130,7 @@ export class DaemonBroker {
       })
     );
   }
-  async invoke(request: DaemonRequest): Promise<unknown> {
+  async invoke(request: DaemonRequest, signal?: AbortSignal): Promise<unknown> {
     if (this.draining) throw new BrokerError('daemon_draining', 'Daemon is draining.');
     const view = this.getView(request);
     const params = request.params as CallToolParams &
@@ -291,10 +294,16 @@ export class DaemonBroker {
                     'operation_expired',
                     'The call reached its deadline while queued; it was not sent to the server.'
                   );
+                if (signal?.aborted)
+                  throw new BrokerError(
+                    'operation_cancelled',
+                    'The caller disconnected while the call was queued; it was not sent to the server.'
+                  );
                 return await runtime.callTool(server, params.tool, {
                   args: params.args,
                   timeoutMs: remainingMs ?? params.timeoutMs,
                   disableOAuth: policy.disableOAuth,
+                  signal,
                 });
               }
               case 'listTools':
@@ -315,6 +324,14 @@ export class DaemonBroker {
                 throw new BrokerError('unknown_method', 'Unknown daemon operation.');
             }
           } catch (error) {
+            if (error instanceof BrokerError) throw error;
+            if (signal?.aborted) {
+              target.uncertain = true;
+              throw new BrokerError(
+                'operation_cancelled',
+                'The caller disconnected; cancellation was sent to the server, but the outcome is unknown. It was not replayed.'
+              );
+            }
             const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
             if (code === SdkErrorCode.ConnectionClosed || code === SdkErrorCode.NotConnected) {
               target.state = 'disconnected';

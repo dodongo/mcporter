@@ -113,6 +113,8 @@ export async function runDaemonHost(options: DaemonHostOptions): Promise<DaemonH
       }
       let timer: NodeJS.Timeout | undefined;
       let id = 'invalid';
+      const callerGone = new AbortController();
+      socket.once('close', () => callerGone.abort());
       try {
         const request = (await frames.read()) as DaemonRequest;
         id = typeof request?.id === 'string' && request.id.length <= 256 ? request.id : 'invalid';
@@ -151,7 +153,7 @@ export async function runDaemonHost(options: DaemonHostOptions): Promise<DaemonH
             break;
           default:
             if (logActivity) logEvent(log, `${request.method} start`);
-            ({ result, notices } = await broker.invokeWithNotices(request));
+            ({ result, notices } = await broker.invokeWithNotices(request, callerGone.signal));
             if (logActivity) logEvent(log, `${request.method} success`);
         }
         frames.write({ id, ok: true, result, notices });

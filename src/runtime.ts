@@ -57,6 +57,7 @@ export interface CallOptions {
    * bearer tokens to be applied. Intended for headless callers.
    */
   readonly disableOAuth?: boolean;
+  readonly signal?: AbortSignal;
 }
 
 export interface ListToolsOptions {
@@ -340,6 +341,7 @@ class McpRuntime implements Runtime {
         // Long runs (e.g., GPT-5 Pro) emit progress/logging; allow that to refresh the timer.
         resetTimeoutOnProgress: true,
         maxTotalTimeout: timeoutMs,
+        signal: options.signal,
       });
       if (!timeoutMs) {
         return await resultPromise;
