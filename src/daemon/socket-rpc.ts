@@ -4,7 +4,13 @@ import net from 'node:net';
 import path from 'node:path';
 import { withFileLock } from '../fs-json.js';
 import { daemonRunDir, secureDaemonDirectory } from './paths.js';
-import { MAX_DAEMON_PAYLOAD_BYTES, type DaemonRequest, type DaemonResponse } from './protocol.js';
+import {
+  MAX_DAEMON_PAYLOAD_BYTES,
+  type CallProgress,
+  type DaemonProgressFrame,
+  type DaemonRequest,
+  type DaemonResponse,
+} from './protocol.js';
 
 export async function daemonKey(): Promise<Buffer> {
   await secureDaemonDirectory();
@@ -119,7 +125,8 @@ async function authenticateClient(frames: SocketFrames, key: Buffer): Promise<vo
 export async function requestDaemon<T>(
   socketPath: string,
   request: DaemonRequest,
-  idleTimeoutMs: number
+  idleTimeoutMs: number,
+  onProgress?: (progress: CallProgress) => void
 ): Promise<DaemonResponse<T>> {
   const key = await daemonKey();
   const socket = net.createConnection(socketPath);
@@ -133,9 +140,12 @@ export async function requestDaemon<T>(
     await authenticateClient(frames, key);
     frames.write(request);
     for (;;) {
-      const response = (await frames.read()) as DaemonResponse<T> & { type?: string };
+      const response = (await frames.read()) as DaemonResponse<T> & Partial<Omit<DaemonProgressFrame, 'id'>>;
       if (!response || response.id !== request.id) throw new Error('Mismatched daemon response.');
-      if (response.type === 'progress') continue;
+      if (response.type === 'progress') {
+        if (response.progress) onProgress?.(response.progress);
+        continue;
+      }
       if (typeof response.ok !== 'boolean') throw new Error('Invalid daemon response.');
       return response;
     }

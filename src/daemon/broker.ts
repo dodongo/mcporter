@@ -23,7 +23,7 @@ import {
   isExistingChromeDefinition,
   type ResolvedServerDefinition,
 } from './connection-identity.js';
-import type { CallToolParams, DaemonRequest, ListToolsParams, StatusResult } from './protocol.js';
+import type { CallProgress, CallToolParams, DaemonRequest, ListToolsParams, StatusResult } from './protocol.js';
 import { decodeView } from './view-codec.js';
 import { authorizeBrokerDefinition } from './transport-authority.js';
 
@@ -111,10 +111,11 @@ export class DaemonBroker {
   }
   async invokeWithNotices(
     request: DaemonRequest,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    onProgress?: (progress: CallProgress) => void
   ): Promise<{ result: unknown; notices: string[] }> {
     const messages = new Set<string>();
-    const result = await notices.run(messages, () => this.invoke(request, signal));
+    const result = await notices.run(messages, () => this.invoke(request, signal, onProgress));
     return { result, notices: [...messages] };
   }
   private makeRuntime(definition: ServerDefinition, clientInfo: { name: string; version: string }): Promise<Runtime> {
@@ -130,7 +131,11 @@ export class DaemonBroker {
       })
     );
   }
-  async invoke(request: DaemonRequest, signal?: AbortSignal): Promise<unknown> {
+  async invoke(
+    request: DaemonRequest,
+    signal?: AbortSignal,
+    onProgress?: (progress: CallProgress) => void
+  ): Promise<unknown> {
     if (this.draining) throw new BrokerError('daemon_draining', 'Daemon is draining.');
     const view = this.getView(request);
     const params = request.params as CallToolParams &
@@ -304,6 +309,7 @@ export class DaemonBroker {
                   timeoutMs: remainingMs ?? params.timeoutMs,
                   disableOAuth: policy.disableOAuth,
                   signal,
+                  onProgress,
                 });
               }
               case 'listTools':

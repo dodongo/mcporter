@@ -12,11 +12,11 @@ describe('runtime callTool timeouts', () => {
     const runtime = await createRuntime({ servers: [] });
 
     const callTool = vi.fn(
-      async (_params, options?: { timeout?: number; resetTimeoutOnProgress?: boolean; maxTotalTimeout?: number }) => {
+      async (_params, options?: { timeout?: number; resetTimeoutOnProgress?: boolean; onprogress?: unknown }) => {
         // Simulate a successful response without timing out.
         expect(options?.timeout).toBe(456);
         expect(options?.resetTimeoutOnProgress).toBe(true);
-        expect(options?.maxTotalTimeout).toBe(456);
+        expect(options?.onprogress).toBeTypeOf('function');
         return { ok: true };
       }
     );

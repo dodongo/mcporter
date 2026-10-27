@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { normalizeTimeout, raceWithTimeout } from '../src/runtime/utils.js';
+import { normalizeTimeout, raceWithInactivityTimeout, raceWithTimeout } from '../src/runtime/utils.js';
 
 describe('normalizeTimeout', () => {
   it('returns undefined for invalid inputs', () => {
@@ -15,6 +15,34 @@ describe('normalizeTimeout', () => {
 
   it('caps values at Node timer maximum instead of wrapping to an immediate timeout', () => {
     expect(normalizeTimeout(Number.MAX_SAFE_INTEGER)).toBe(2_147_483_647);
+  });
+});
+
+describe('raceWithInactivityTimeout', () => {
+  it('restarts the timeout on each activity and rejects after a quiet period', async () => {
+    vi.useFakeTimers();
+    try {
+      const activities: Array<() => void> = [];
+      const activity = () => activities[0]?.();
+      const promise = raceWithInactivityTimeout((reportActivity) => {
+        activities.push(reportActivity);
+        return new Promise<void>(() => {});
+      }, 500);
+      const expectation = expect(promise).rejects.toThrowError('Timeout');
+      await vi.advanceTimersByTimeAsync(400);
+      activity();
+      await vi.advanceTimersByTimeAsync(400);
+      activity();
+      await vi.advanceTimersByTimeAsync(499);
+      let settled = false;
+      void promise.catch(() => (settled = true));
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await expectation;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

@@ -213,13 +213,16 @@ describe('CLI entrypoint dispatch coverage', () => {
       allowCachedAuth: undefined,
       disableOAuth: true,
     });
-    expect(mocks.daemonCallTool).toHaveBeenCalledWith({
-      server: 'chrome-devtools',
-      tool: 'list_pages',
-      args: { page: 1 },
-      timeoutMs: 25,
-      disableOAuth: undefined,
-    });
+    expect(mocks.daemonCallTool).toHaveBeenCalledWith(
+      {
+        server: 'chrome-devtools',
+        tool: 'list_pages',
+        args: { page: 1 },
+        timeoutMs: 25,
+        disableOAuth: undefined,
+      },
+      undefined
+    );
     expect(mocks.daemonListResources).toHaveBeenCalledWith({
       server: 'chrome-devtools',
       params: { cursor: 'next' },

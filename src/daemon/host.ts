@@ -153,7 +153,9 @@ export async function runDaemonHost(options: DaemonHostOptions): Promise<DaemonH
             break;
           default:
             if (logActivity) logEvent(log, `${request.method} start`);
-            ({ result, notices } = await broker.invokeWithNotices(request, callerGone.signal));
+            ({ result, notices } = await broker.invokeWithNotices(request, callerGone.signal, (progress) => {
+              if (!socket.destroyed) frames.write({ type: 'progress', id, progress });
+            }));
             if (logActivity) logEvent(log, `${request.method} success`);
         }
         frames.write({ id, ok: true, result, notices });

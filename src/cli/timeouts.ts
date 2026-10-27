@@ -72,10 +72,14 @@ function defaultServerTimeout(fallback: number, definition?: ServerDefinition): 
 
 // withTimeout races a promise against a timeout to avoid hangs.
 export function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return withInactivityTimeout(() => promise, timeoutMs);
+}
+
+export function withInactivityTimeout<T>(start: (activity: () => void) => Promise<T>, timeoutMs: number): Promise<T> {
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-    return promise;
+    return start(() => {});
   }
-  return raceWithTimeout(promise, timeoutMs);
+  return raceWithInactivityTimeout(start, timeoutMs);
 }
 
 export function consumeTimeoutFlag(
@@ -96,4 +100,4 @@ export function consumeTimeoutFlag(
   args.splice(index, 2);
   return parsed;
 }
-import { raceWithTimeout } from '../runtime/utils.js';
+import { raceWithInactivityTimeout } from '../runtime/utils.js';

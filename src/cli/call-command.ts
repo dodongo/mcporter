@@ -27,10 +27,10 @@ import {
 import { saveCallImagesIfRequested } from './image-output.js';
 import { buildConnectionIssueEnvelope } from './json-output.js';
 import type { OutputFormat } from './output-utils.js';
-import { printCallOutput, tailLogIfRequested } from './output-utils.js';
+import { printCallOutput, printCallProgress, tailLogIfRequested } from './output-utils.js';
 import { dumpActiveHandles } from './runtime-debug.js';
 import { dimText, redText, yellowText } from './terminal.js';
-import { resolveServerCallTimeout, withTimeout } from './timeouts.js';
+import { resolveServerCallTimeout, withInactivityTimeout, withTimeout } from './timeouts.js';
 import { loadToolMetadata } from './tool-cache.js';
 
 interface ResolvedCallTarget {
@@ -570,7 +570,19 @@ async function attemptCall(
   disableOAuth: boolean | undefined
 ): Promise<{ result: unknown; resolvedTool: string }> {
   try {
-    const result = await withTimeout(runtime.callTool(server, tool, { args, timeoutMs, disableOAuth }), timeoutMs);
+    const result = await withInactivityTimeout(
+      (activity) =>
+        runtime.callTool(server, tool, {
+          args,
+          timeoutMs,
+          disableOAuth,
+          onProgress: (progress) => {
+            activity();
+            printCallProgress(progress);
+          },
+        }),
+      timeoutMs
+    );
     if (allowCorrection && isErrorCallResult(result)) {
       const resolution = await maybeResolveToolName(runtime, server, tool, result, disableOAuth);
       if (resolution) {

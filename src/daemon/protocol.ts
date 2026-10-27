@@ -66,9 +66,16 @@ export interface DaemonResponse<T = unknown> {
   };
 }
 
+export interface CallProgress {
+  readonly progress: number;
+  readonly total?: number;
+  readonly message?: string;
+}
+
 export interface DaemonProgressFrame {
   readonly type: 'progress';
   readonly id: string;
+  readonly progress?: CallProgress;
 }
 
 export type DaemonFrame<T = unknown> = DaemonProgressFrame | DaemonResponse<T>;

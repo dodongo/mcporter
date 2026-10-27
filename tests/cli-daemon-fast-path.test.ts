@@ -65,12 +65,15 @@ describe('daemon call fast path', () => {
         configExplicit: false,
       })
     );
-    expect(mocks.daemonCallTool).toHaveBeenCalledWith({
-      server: 'chrome-devtools',
-      tool: 'list_pages',
-      args: {},
-      timeoutMs: 300_000,
-    });
+    expect(mocks.daemonCallTool).toHaveBeenCalledWith(
+      {
+        server: 'chrome-devtools',
+        tool: 'list_pages',
+        args: {},
+        timeoutMs: 300_000,
+      },
+      expect.any(Function)
+    );
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('"text": "ok"'));
   });
 
@@ -85,7 +88,8 @@ describe('daemon call fast path', () => {
       expect.objectContaining({
         server: 'chrome-devtools',
         tool: 'list_pages',
-      })
+      }),
+      expect.any(Function)
     );
   });
 
@@ -115,7 +119,8 @@ describe('daemon call fast path', () => {
         tool: 'list_pages',
         args: { includeHidden: true },
         timeoutMs: 300_000,
-      })
+      }),
+      expect.any(Function)
     );
   });
 
@@ -131,7 +136,8 @@ describe('daemon call fast path', () => {
         server: 'chrome-devtools',
         tool: 'list_pages',
         args: { limit: 5 },
-      })
+      }),
+      expect.any(Function)
     );
   });
 

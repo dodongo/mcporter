@@ -109,13 +109,16 @@ class KeepAliveRuntime implements Runtime {
   async callTool(server: string, toolName: string, options?: CallOptions): Promise<unknown> {
     if (this.shouldUseDaemon(server)) {
       return this.invokeOnce(server, 'callTool', () =>
-        this.daemon.callTool({
-          server,
-          tool: toolName,
-          args: options?.args,
-          timeoutMs: options?.timeoutMs,
-          disableOAuth: options?.disableOAuth,
-        })
+        this.daemon.callTool(
+          {
+            server,
+            tool: toolName,
+            args: options?.args,
+            timeoutMs: options?.timeoutMs,
+            disableOAuth: options?.disableOAuth,
+          },
+          options?.onProgress
+        )
       );
     }
     return this.base.callTool(server, toolName, options);

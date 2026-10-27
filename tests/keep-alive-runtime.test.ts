@@ -101,13 +101,16 @@ describe('createKeepAliveRuntime', () => {
     });
 
     await keepAliveRuntime.callTool('alpha', 'ping', { args: { value: 1 }, timeoutMs: 4_200 });
-    expect(daemon.callTool).toHaveBeenCalledWith({
-      server: 'alpha',
-      tool: 'ping',
-      args: { value: 1 },
-      timeoutMs: 4_200,
-      disableOAuth: undefined,
-    });
+    expect(daemon.callTool).toHaveBeenCalledWith(
+      {
+        server: 'alpha',
+        tool: 'ping',
+        args: { value: 1 },
+        timeoutMs: 4_200,
+        disableOAuth: undefined,
+      },
+      undefined
+    );
 
     await keepAliveRuntime.listTools('alpha', { includeSchema: true });
     expect(daemon.listTools).toHaveBeenCalledWith({
@@ -175,13 +178,16 @@ describe('createKeepAliveRuntime', () => {
     });
 
     await keepAliveRuntime.callTool('alpha', 'ping', { disableOAuth: true });
-    expect(daemon.callTool).toHaveBeenCalledWith({
-      server: 'alpha',
-      tool: 'ping',
-      args: undefined,
-      timeoutMs: undefined,
-      disableOAuth: true,
-    });
+    expect(daemon.callTool).toHaveBeenCalledWith(
+      {
+        server: 'alpha',
+        tool: 'ping',
+        args: undefined,
+        timeoutMs: undefined,
+        disableOAuth: true,
+      },
+      undefined
+    );
 
     await keepAliveRuntime.listTools('alpha', { disableOAuth: true });
     expect(daemon.listTools).toHaveBeenCalledWith({

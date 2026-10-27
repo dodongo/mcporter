@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { inspect } from 'node:util';
+import type { CallProgress } from '../daemon/protocol.js';
 import type { CallResult } from '../result-utils.js';
 import { logWarn } from './logger-context.js';
 
@@ -29,6 +30,12 @@ export function printCallOutput<T>(wrapped: CallResult<T>, raw: T, format: Outpu
   const preferredKinds = PREFERRED_OUTPUT_BY_FORMAT[format];
   const renderable = resolveRenderableOutput(wrapped, raw, preferredKinds);
   emitRenderableOutput(renderable, format);
+}
+
+export function printCallProgress({ progress, total, message }: CallProgress): void {
+  console.error(
+    `[mcporter] progress ${progress}${total === undefined ? '' : `/${total}`}${message ? ` ${message}` : ''}`
+  );
 }
 
 export function tailLogIfRequested(result: unknown, enabled: boolean): void {

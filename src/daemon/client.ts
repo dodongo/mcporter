@@ -10,7 +10,7 @@ import { assertLegacyDrained } from './migration.js';
 import type { ChromeDevtoolsRelayIdentityOptions } from '../chrome-devtools-relay.js';
 import { isProcessRunning } from '../process-utils.js';
 import { getDaemonMetadataPath, getDaemonSocketPath } from './paths.js';
-import { DAEMON_PROTOCOL_VERSION, resolveProgressTiming } from './protocol.js';
+import { DAEMON_PROTOCOL_VERSION, resolveProgressTiming, type CallProgress } from './protocol.js';
 import { waitForDaemonReady } from './startup-readiness.js';
 import type {
   CallToolParams,
@@ -92,9 +92,9 @@ export class DaemonClient {
     this.metadataPath = paths.metadataPath;
   }
 
-  async callTool(params: CallToolParams): Promise<unknown> {
+  async callTool(params: CallToolParams, onProgress?: (progress: CallProgress) => void): Promise<unknown> {
     const deadlineAt = params.timeoutMs === undefined ? undefined : Date.now() + params.timeoutMs;
-    return this.invoke('callTool', { ...params, deadlineAt }, params.timeoutMs);
+    return this.invoke('callTool', { ...params, deadlineAt }, params.timeoutMs, onProgress);
   }
 
   async listTools(params: ListToolsParams): Promise<unknown> {
@@ -179,7 +179,12 @@ export class DaemonClient {
     return this.invoke('getServerMetadata', params, params.timeoutMs);
   }
 
-  private async invoke<T = unknown>(method: DaemonRequestMethod, params: unknown, timeoutMs?: number): Promise<T> {
+  private async invoke<T = unknown>(
+    method: DaemonRequestMethod,
+    params: unknown,
+    timeoutMs?: number,
+    onProgress?: (progress: CallProgress) => void
+  ): Promise<T> {
     const epoch = (this.epoch ??= { definitions: this.definitions, clientInfo: this.clientInfo, active: 0 });
     // Retain before registration or authenticated RPC establishment can yield to a replacement/close.
     epoch.active++;
@@ -212,7 +217,7 @@ export class DaemonClient {
         throw error;
       }
       try {
-        return await this.sendRequest<T>(method, params, timeoutMs, handle);
+        return await this.sendRequest<T>(method, params, timeoutMs, handle, onProgress);
       } catch (error) {
         if (!(error instanceof RenewViewError) || this.epoch !== epoch) throw error;
         // Compare the rejected registration so concurrent callers share one renewal.
@@ -234,7 +239,7 @@ export class DaemonClient {
             }
           );
         // Deliberately outside the retry catch: repeated expiry gets no further replay.
-        return await this.sendRequest<T>(method, params, timeoutMs, renewed);
+        return await this.sendRequest<T>(method, params, timeoutMs, renewed, onProgress);
       }
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
@@ -296,7 +301,8 @@ export class DaemonClient {
     method: DaemonRequestMethod,
     params: unknown,
     timeoutOverrideMs?: number,
-    handle?: { view: string; generation: string }
+    handle?: { view: string; generation: string },
+    onProgress?: (progress: CallProgress) => void
   ): Promise<T> {
     const progressTiming = resolveProgressTiming(resolveDaemonTimeout(timeoutOverrideMs));
     const request: DaemonRequest = {
@@ -307,7 +313,7 @@ export class DaemonClient {
       protocolVersion: DAEMON_PROTOCOL_VERSION,
       progressIntervalMs: progressTiming.progressIntervalMs,
     };
-    const parsed = await requestDaemon<T>(this.socketPath, request, progressTiming.idleTimeoutMs);
+    const parsed = await requestDaemon<T>(this.socketPath, request, progressTiming.idleTimeoutMs, onProgress);
     for (const notice of parsed.notices ?? []) {
       console.warn(`[mcporter] ${notice}`);
     }

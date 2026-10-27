@@ -36,20 +36,36 @@ export function normalizeTimeout(raw?: number): number | undefined {
 }
 
 export function raceWithTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return raceWithInactivityTimeout(() => promise, timeoutMs);
+}
+
+export function raceWithInactivityTimeout<T>(
+  start: (activity: () => void) => Promise<T>,
+  timeoutMs: number
+): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const delayMs = Number.isFinite(timeoutMs)
       ? Math.min(Math.max(Math.trunc(timeoutMs), 1), MAX_TIMER_DELAY_MS)
       : MAX_TIMER_DELAY_MS;
-    const cancelTimeout = scheduleDeadline(() => {
+    let settled = false;
+    const expire = () => {
+      settled = true;
       // Reject with a Timeout error; higher-level catch blocks decide whether to recycle the transport.
       reject(new Error('Timeout'));
-    }, delayMs);
-    promise.then(
+    };
+    let cancelTimeout = scheduleDeadline(expire, delayMs);
+    start(() => {
+      if (settled) return;
+      cancelTimeout();
+      cancelTimeout = scheduleDeadline(expire, delayMs);
+    }).then(
       (value) => {
+        settled = true;
         cancelTimeout();
         resolve(value);
       },
       (error) => {
+        settled = true;
         cancelTimeout();
         reject(error);
       }

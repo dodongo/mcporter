@@ -527,7 +527,7 @@ async function maybeHandleSimpleDaemonFastCall(
     return false;
   }
 
-  const [{ DaemonClient }, { wrapCallResult }, { printCallOutput }] = await Promise.all([
+  const [{ DaemonClient }, { wrapCallResult }, { printCallOutput, printCallProgress }] = await Promise.all([
     import('./daemon/client.js'),
     import('./result-utils.js'),
     import('./cli/output-utils.js'),
@@ -537,13 +537,16 @@ async function maybeHandleSimpleDaemonFastCall(
     configExplicit: configResolution.explicit,
     rootDir,
   });
-  const result = await daemonClient.callTool({
-    server: parsed.server,
-    tool: parsed.tool,
-    args: Object.keys(parsed.args).length > 0 ? parsed.args : undefined,
-    timeoutMs: resolveServerCallTimeout(parsed.timeoutMs, undefined, parsed.server),
-    disableOAuth: parsed.disableOAuth,
-  });
+  const result = await daemonClient.callTool(
+    {
+      server: parsed.server,
+      tool: parsed.tool,
+      args: Object.keys(parsed.args).length > 0 ? parsed.args : undefined,
+      timeoutMs: resolveServerCallTimeout(parsed.timeoutMs, undefined, parsed.server),
+      disableOAuth: parsed.disableOAuth,
+    },
+    printCallProgress
+  );
   const { callResult } = wrapCallResult(result);
   printCallOutput(callResult, result, parsed.output);
   return true;
@@ -660,13 +663,16 @@ function createDaemonOnlyRuntime(daemonClient: import('./daemon/client.js').Daem
         timeoutMs: options?.timeoutMs,
       })) as Awaited<ReturnType<Runtime['listTools']>>,
     callTool: (server, toolName, options) =>
-      daemonClient.callTool({
-        server,
-        tool: toolName,
-        args: options?.args,
-        timeoutMs: options?.timeoutMs,
-        disableOAuth: options?.disableOAuth,
-      }),
+      daemonClient.callTool(
+        {
+          server,
+          tool: toolName,
+          args: options?.args,
+          timeoutMs: options?.timeoutMs,
+          disableOAuth: options?.disableOAuth,
+        },
+        options?.onProgress
+      ),
     listResources: (server, options) => {
       const params: Record<string, unknown> = { ...options };
       delete params.allowCachedAuth;

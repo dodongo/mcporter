@@ -223,10 +223,11 @@ function normalizeClientIdentityMeta(params: unknown): unknown {
     return params;
   }
   const meta = { ...params._meta };
-  for (const key of CLIENT_IDENTITY_META_KEYS) {
+  for (const key of [...CLIENT_IDENTITY_META_KEYS, 'progressToken']) {
     delete meta[key];
   }
-  return { ...params, _meta: meta };
+  const { _meta: _, ...rest } = params;
+  return Object.keys(meta).length === 0 ? rest : { ...rest, _meta: meta };
 }
 
 function normalizeInitializeParams(params: unknown): unknown {

@@ -1,5 +1,5 @@
 import { validateBrokerRequestAuthority } from './daemon/transport-authority.js';
-import type { ServerMetadata } from './daemon/protocol.js';
+import type { CallProgress, ServerMetadata } from './daemon/protocol.js';
 import {
   type CallToolRequest,
   type ListResourcesRequest,
@@ -19,7 +19,7 @@ import {
 import { resolveOAuthTimeoutFromEnv } from './runtime/oauth.js';
 import { resolveRecordingPath } from './runtime/record-transport.js';
 import type { ClientContext } from './runtime/transport.js';
-import { normalizeTimeout, raceWithTimeout } from './runtime/utils.js';
+import { normalizeTimeout, raceWithInactivityTimeout, raceWithTimeout } from './runtime/utils.js';
 import { filterTools, isToolAllowed, validateToolFilters } from './tool-filters.js';
 import { MCPORTER_VERSION } from './version.js';
 
@@ -58,6 +58,7 @@ export interface CallOptions {
    */
   readonly disableOAuth?: boolean;
   readonly signal?: AbortSignal;
+  readonly onProgress?: (progress: CallProgress) => void;
 }
 
 export interface ListToolsOptions {
@@ -333,20 +334,23 @@ class McpRuntime implements Runtime {
         arguments: options.args ?? {},
       };
       // Forward the requested timeout to the MCP client so server-side requests don't hit the SDK's
-      // default 60s cap. Keep our own outer race as a second guard.
+      // default 60s cap. Keep our own outer race as a second guard; progress restarts both.
       const timeoutMs = normalizeTimeout(options.timeoutMs);
       await validateBrokerRequestAuthority(definition);
-      const resultPromise = client.callTool(params, {
-        timeout: timeoutMs,
-        // Long runs (e.g., GPT-5 Pro) emit progress/logging; allow that to refresh the timer.
-        resetTimeoutOnProgress: true,
-        maxTotalTimeout: timeoutMs,
-        signal: options.signal,
-      });
+      const call = (activity: () => void) =>
+        client.callTool(params, {
+          timeout: timeoutMs,
+          resetTimeoutOnProgress: true,
+          onprogress: (progress) => {
+            activity();
+            options.onProgress?.(progress);
+          },
+          signal: options.signal,
+        });
       if (!timeoutMs) {
-        return await resultPromise;
+        return await call(() => {});
       }
-      return await raceWithTimeout(resultPromise, timeoutMs);
+      return await raceWithInactivityTimeout(call, timeoutMs);
     } catch (error) {
       // Runtime timeouts and transport crashes should tear down the cached connection so
       // the daemon (or direct runtime) can relaunch the MCP server on the next attempt.

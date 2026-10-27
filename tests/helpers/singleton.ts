@@ -29,6 +29,10 @@ import { StdioServerTransport } from '${pathToFileURL(require.resolve('@modelcon
 const id=randomUUID();let count=0;fs.appendFileSync(${JSON.stringify(path.join(root, 'instances'))},id+'\\n');
 ${options.exclusive ? `const lock=${JSON.stringify(path.join(root, 'exclusive.lock'))};fs.closeSync(fs.openSync(lock,'wx'));process.on('exit',()=>fs.unlinkSync(lock));` : ''}
 const server=new McpServer({name:'synthetic',version:'1',title:'Synthetic tools'}, {instructions:'Operate the synthetic fixture.'});
+server.registerTool('progressing',{inputSchema:{}},async(_args,extra)=>{
+ for(let step=1;step<=4;step++){await new Promise(r=>setTimeout(r,100));await extra.sendNotification({method:'notifications/progress',params:{progressToken:extra._meta.progressToken,progress:step,total:4,message:'step '+step}});}
+ return {content:[{type:'text',text:JSON.stringify({id,count,value:process.env.VALUE,cwd:process.cwd()})}]};
+});
 for(const name of ['identity','secret','delayed','application_error','disconnect'])server.registerTool(name,{inputSchema:{}},async(_args,extra)=>{
  count++; if(name==='disconnect')setTimeout(()=>process.exit(0),10); if(name==='delayed'){fs.appendFileSync(${JSON.stringify(path.join(root, 'effects'))},'once\\n');extra.signal.addEventListener('abort',()=>fs.appendFileSync(${JSON.stringify(path.join(root, 'cancellations'))},'delayed\\n'));await new Promise(r=>setTimeout(r,250));}
  return name==='application_error'?{isError:true,content:[{type:'text',text:'synthetic tool error'}]}:{content:[{type:'text',text:JSON.stringify({id,count,value:process.env.VALUE,cwd:process.cwd()})}]};
