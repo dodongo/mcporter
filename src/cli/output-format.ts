@@ -8,7 +8,7 @@ interface ConsumeOutputOptions {
 }
 
 export function consumeOutputFormat(args: string[], options: ConsumeOutputOptions = {}): OutputFormat {
-  const allowed = options.allowed ?? ['auto', 'text', 'markdown', 'json', 'raw'];
+  const allowed = options.allowed ?? ['auto', 'text', 'markdown', 'json', 'raw', 'envelope'];
   const defaultFormat = options.defaultFormat ?? 'auto';
   const enableRawShortcut = options.enableRawShortcut !== false;
   let format: OutputFormat = defaultFormat;
@@ -27,7 +27,7 @@ export function consumeOutputFormat(args: string[], options: ConsumeOutputOption
         throw new Error("Flag '--output' requires a value.");
       }
       if (!isCliOutputFormat(value)) {
-        throw new Error('--output format must be one of: auto, text, markdown, json, raw.');
+        throw new Error('--output format must be one of: auto, text, markdown, json, raw, envelope.');
       }
       if (!isAllowed(value)) {
         throw new Error(`--output format '${value}' is not supported for this command.`);
@@ -62,5 +62,12 @@ export function consumeOutputFormat(args: string[], options: ConsumeOutputOption
 }
 
 export function isCliOutputFormat(value: string): value is OutputFormat {
-  return value === 'auto' || value === 'text' || value === 'markdown' || value === 'json' || value === 'raw';
+  return (
+    value === 'auto' ||
+    value === 'text' ||
+    value === 'markdown' ||
+    value === 'json' ||
+    value === 'raw' ||
+    value === 'envelope'
+  );
 }

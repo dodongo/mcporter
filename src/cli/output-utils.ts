@@ -4,7 +4,7 @@ import { inspect } from 'node:util';
 import type { CallResult } from '../result-utils.js';
 import { logWarn } from './logger-context.js';
 
-export type OutputFormat = 'auto' | 'text' | 'markdown' | 'json' | 'raw';
+export type OutputFormat = 'auto' | 'text' | 'markdown' | 'json' | 'raw' | 'envelope';
 const RAW_INSPECT_DEPTH = 8;
 const TAIL_LOG_LINE_COUNT = 20;
 const TAIL_LOG_MAX_BYTES = 1024 * 1024;
@@ -22,6 +22,7 @@ const PREFERRED_OUTPUT_BY_FORMAT: Record<OutputFormat, RenderableKind[]> = {
   markdown: ['markdown', 'text', 'json', 'raw'],
   json: ['json', 'raw'],
   raw: ['raw'],
+  envelope: ['raw'],
 };
 
 export function printCallOutput<T>(wrapped: CallResult<T>, raw: T, format: OutputFormat): void {
@@ -157,7 +158,7 @@ function attemptPrintJson(value: unknown): boolean {
 }
 
 function printRaw(raw: unknown, requestedFormat?: OutputFormat): void {
-  if (requestedFormat === 'json') {
+  if (requestedFormat === 'json' || requestedFormat === 'envelope') {
     try {
       const serialized = JSON.stringify(raw, null, 2);
       console.log(typeof serialized === 'string' ? serialized : 'null');

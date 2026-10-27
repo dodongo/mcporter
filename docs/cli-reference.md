@@ -50,7 +50,7 @@ A quick reference for the primary `mcporter` subcommands. Each command inherits
   - `--args <json>`, `--params <json>` – provide a JSON object payload.
   - `--` – stop flag parsing so remaining tokens stay literal positional values.
   - `--timeout <ms>` – override the call timeout (60 s normally, 300 s for Chrome auto-connect to cover cumulative relay startup); `MCPORTER_CALL_TIMEOUT` provides the equivalent environment override.
-  - `--output text|markdown|json|raw` – choose how to render the `CallResult`.
+  - `--output text|markdown|json|raw|envelope` – choose how to render the `CallResult`; `envelope` prints the whole MCP result as JSON.
   - `--save-images <dir>` – persist image content blocks to files under the specified directory.
   - `--raw-strings` – disable numeric coercion for flag-style and positional values.
   - `--no-coerce` – disable all flag-style/positional value coercion.

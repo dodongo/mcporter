@@ -181,6 +181,29 @@ describe('printCallOutput format selection', () => {
   });
 });
 
+describe('printCallOutput envelope output', () => {
+  it('prints the whole MCP result as JSON where json keeps only the structured value', () => {
+    const raw = {
+      isError: true,
+      structuredContent: { id: 1 },
+      content: [
+        { type: 'text', text: 'note' },
+        { type: 'resource_link', uri: 'file:///report', name: 'report' },
+        { type: 'image', data: 'aW1n', mimeType: 'image/png' },
+      ],
+    };
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      printCallOutput(createCallResult(raw), raw, 'json');
+      printCallOutput(createCallResult(raw), raw, 'envelope');
+      expect(JSON.parse(String(log.mock.calls[0]?.[0]))).toEqual({ id: 1 });
+      expect(JSON.parse(String(log.mock.calls[1]?.[0]))).toEqual(raw);
+    } finally {
+      log.mockRestore();
+    }
+  });
+});
+
 describe('printCallOutput raw output', () => {
   it('does not truncate long strings when printing raw output', () => {
     const longText = 'x'.repeat(15000);

@@ -9,7 +9,7 @@ export const CALL_HELP_ARGUMENT_LINES = [
 
 export const CALL_HELP_RUNTIME_FLAG_LINES = [
   '  --timeout <ms>         Override the call timeout.',
-  '  --output text|markdown|json|raw  Control formatting.',
+  '  --output text|markdown|json|raw|envelope  Control formatting; envelope prints the whole MCP result as JSON.',
   '  --save-images <dir>    Save image content blocks to a directory.',
   '  --no-oauth             Never start OAuth; use cached tokens only.',
   '  --raw-strings          Keep numeric-looking argument values as strings.',

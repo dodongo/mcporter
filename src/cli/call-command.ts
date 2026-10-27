@@ -205,7 +205,11 @@ async function invokePreparedCall(
     );
   } catch (error) {
     const issue = maybeReportConnectionIssue(prepared.server, prepared.tool, error);
-    if (prepared.parsed.output === 'json' || prepared.parsed.output === 'raw') {
+    if (
+      prepared.parsed.output === 'json' ||
+      prepared.parsed.output === 'raw' ||
+      prepared.parsed.output === 'envelope'
+    ) {
       const payload = buildConnectionIssueEnvelope({ server: prepared.server, tool: prepared.tool, error, issue });
       console.log(JSON.stringify(payload, null, 2));
       process.exitCode = 1;
@@ -645,7 +649,8 @@ async function maybeRetryResolvedTool(
     return undefined;
   }
   if (messages.auto) {
-    const emitAutoMessage = outputFormat === 'json' || outputFormat === 'raw' ? console.error : console.log;
+    const emitAutoMessage =
+      outputFormat === 'json' || outputFormat === 'raw' || outputFormat === 'envelope' ? console.error : console.log;
     emitAutoMessage(dimText(messages.auto));
   }
   return attemptCall(runtime, server, resolution.value, args, timeoutMs, outputFormat, false, disableOAuth);
