@@ -44,13 +44,17 @@ interface Entry {
   connection?: Promise<ClientContext>;
   processes?: ProcessIdentity[];
   serial: Promise<unknown>;
+  exclusive: Promise<unknown>;
+  running: Set<Promise<void>>;
   generation: number;
   clientInfo: { name: string; version: string };
   policy: { allowCachedAuth: boolean; disableOAuth: boolean };
   idleTimer?: NodeJS.Timeout;
   uncertain?: boolean;
+  retirementError?: unknown;
 }
 const notices = new AsyncLocalStorage<Set<string>>();
+const REPLAY_EXPIRED_SESSION = Symbol('replay expired session');
 export class BrokerError extends Error {
   constructor(
     readonly code: string,
@@ -195,6 +199,8 @@ export class DaemonBroker {
           state: 'pending',
           chrome,
           serial: Promise.resolve(),
+          exclusive: Promise.resolve(),
+          running: new Set(),
           generation: 1,
           policy,
           clientInfo: view.clientInfo,
@@ -206,167 +212,155 @@ export class DaemonBroker {
         withRuntimeEnvironment(target.definition.env ?? {}, async () => {
           // Queued requests must still hold authority before any connection/recovery I/O.
           if (chrome) await this.owner.resolveIdentity(definition);
-          // Reconnect is owned by this serialized generation, only after all old calls settle.
-          if (target.state === 'retirement-failed')
-            throw new BrokerError(
-              'transport_retirement_failed',
-              'Old transport retirement is unverified; no replacement was launched.'
-            );
-          if (target.state === 'disconnected' || target.state === 'idle') {
-            try {
-              if (target.state !== 'idle') await this.retire(target);
-            } catch (error) {
-              target.state = 'retirement-failed';
-              throw error;
-            }
-            target.runtime = this.makeRuntime(target.definition, target.clientInfo);
-            target.connection = undefined;
-            target.processes = undefined;
-            target.uncertain = false;
-            target.generation++;
-            target.state = 'pending';
-          }
-          const runtime = await target.runtime;
-          if (!target.connection) {
-            target.connection = runtime
-              .connect(target.definition.name, policy)
-              .then(async (context) => {
-                const pid = (context.transport as { pid?: number }).pid;
-                const generation = target.generation;
-                const previous = context.client.onclose;
-                context.client.onclose = () => {
-                  if (target.generation === generation && target.state !== 'retirement-failed') {
-                    target.state = 'disconnected';
-                    if (target.chrome && !this.draining) {
-                      target.serial = target.serial.then(async () => {
-                        if (this.draining || target.generation !== generation || target.state !== 'disconnected')
-                          return;
-                        try {
-                          await this.retire(target);
-                          target.state = 'idle';
-                        } catch {
-                          target.state = 'retirement-failed';
-                        }
-                      });
+          const release = await this.admit(target);
+          try {
+            const runtime = await target.runtime;
+            if (!target.connection) {
+              target.connection = runtime
+                .connect(target.definition.name, policy)
+                .then(async (context) => {
+                  const pid = (context.transport as { pid?: number }).pid;
+                  const generation = target.generation;
+                  const previous = context.client.onclose;
+                  context.client.onclose = () => {
+                    if (target.generation === generation && target.state !== 'retirement-failed') {
+                      target.state = 'disconnected';
+                      if (target.chrome && !this.draining) {
+                        target.serial = target.serial.then(async () => {
+                          if (this.draining || target.generation !== generation || target.state !== 'disconnected')
+                            return;
+                          try {
+                            await this.retire(target);
+                            target.state = 'idle';
+                          } catch {
+                            target.state = 'retirement-failed';
+                          }
+                        });
+                      }
+                    }
+                    previous?.();
+                  };
+                  target.state = 'connected';
+                  if (pid) {
+                    try {
+                      target.processes = await ownedProcessTree(pid);
+                    } catch (error) {
+                      throw new BrokerError(
+                        'transport_retirement_failed',
+                        error instanceof ProcessObservationError
+                          ? error.message
+                          : 'Transport ownership could not be verified; inspect it before recovery.'
+                      );
                     }
                   }
-                  previous?.();
-                };
-                target.state = 'connected';
-                if (pid) {
-                  try {
-                    target.processes = await ownedProcessTree(pid);
-                  } catch (error) {
-                    throw new BrokerError(
-                      'transport_retirement_failed',
-                      error instanceof ProcessObservationError
-                        ? error.message
-                        : 'Transport ownership could not be verified; inspect it before recovery.'
-                    );
-                  }
-                }
-                return context;
-              })
-              .catch((error: unknown) => {
-                target.connection = undefined;
-                if (
-                  error &&
-                  typeof error === 'object' &&
-                  'code' in error &&
-                  error.code === 'transport_retirement_failed'
-                )
-                  target.state = 'retirement-failed';
-                throw error;
-              });
-          }
-          const context = await target.connection;
-          // Runtime operations validate again after their own connect await, at SDK dispatch.
-          const server = target.definition.name;
-          try {
-            switch (request.method) {
-              case 'getServerMetadata': {
-                if (chrome) await this.owner.resolveIdentity(definition);
-                const info = context.client.getServerVersion();
-                return {
-                  instructions: context.client.getInstructions(),
-                  serverInfo: info ? { name: info.name, version: info.version, title: info.title } : undefined,
-                };
-              }
-              case 'callTool': {
-                const remainingMs = params.deadlineAt === undefined ? undefined : params.deadlineAt - Date.now();
-                if (remainingMs !== undefined && remainingMs <= 0)
-                  throw new BrokerError(
-                    'operation_expired',
-                    'The call reached its deadline while queued; it was not sent to the server.'
-                  );
-                if (signal?.aborted)
-                  throw new BrokerError(
-                    'operation_cancelled',
-                    'The caller disconnected while the call was queued; it was not sent to the server.'
-                  );
-                return await runtime.callTool(server, params.tool, {
-                  args: params.args,
-                  timeoutMs: remainingMs ?? params.timeoutMs,
-                  disableOAuth: policy.disableOAuth,
-                  signal,
-                  onProgress,
+                  return context;
+                })
+                .catch((error: unknown) => {
+                  target.connection = undefined;
+                  if (
+                    error &&
+                    typeof error === 'object' &&
+                    'code' in error &&
+                    error.code === 'transport_retirement_failed'
+                  )
+                    target.state = 'retirement-failed';
+                  throw error;
                 });
+            }
+            const context = await target.connection;
+            // Runtime operations validate again after their own connect await, at SDK dispatch.
+            const server = target.definition.name;
+            try {
+              switch (request.method) {
+                case 'getServerMetadata': {
+                  if (chrome) await this.owner.resolveIdentity(definition);
+                  const info = context.client.getServerVersion();
+                  return {
+                    instructions: context.client.getInstructions(),
+                    serverInfo: info ? { name: info.name, version: info.version, title: info.title } : undefined,
+                  };
+                }
+                case 'callTool': {
+                  const remainingMs = params.deadlineAt === undefined ? undefined : params.deadlineAt - Date.now();
+                  if (remainingMs !== undefined && remainingMs <= 0)
+                    throw new BrokerError(
+                      'operation_expired',
+                      'The call reached its deadline while queued; it was not sent to the server.'
+                    );
+                  if (signal?.aborted)
+                    throw new BrokerError(
+                      'operation_cancelled',
+                      'The caller disconnected while the call was queued; it was not sent to the server.'
+                    );
+                  return await runtime.callTool(server, params.tool, {
+                    args: params.args,
+                    timeoutMs: remainingMs ?? params.timeoutMs,
+                    disableOAuth: policy.disableOAuth,
+                    signal,
+                    onProgress,
+                  });
+                }
+                case 'listTools':
+                  return filterTools(
+                    await runtime.listTools(server, {
+                      includeSchema: params.includeSchema,
+                      ...policy,
+                      timeoutMs: params.timeoutMs,
+                    }),
+                    viewDefinition
+                  );
+                case 'listResources':
+                  return await runtime.listResources(server, { ...params.params, ...policy });
+                case 'readResource':
+                  if (typeof params.uri !== 'string') throw new BrokerError('invalid_params', 'Resource URI required.');
+                  return await runtime.readResource(server, params.uri, policy);
+                default:
+                  throw new BrokerError('unknown_method', 'Unknown daemon operation.');
               }
-              case 'listTools':
-                return filterTools(
-                  await runtime.listTools(server, {
-                    includeSchema: params.includeSchema,
-                    ...policy,
-                    timeoutMs: params.timeoutMs,
-                  }),
-                  viewDefinition
+            } catch (error) {
+              if (error instanceof BrokerError) throw error;
+              if (signal?.aborted) {
+                target.uncertain = true;
+                throw new BrokerError(
+                  'operation_cancelled',
+                  'The caller disconnected; cancellation was sent to the server, but the outcome is unknown. It was not replayed.'
                 );
-              case 'listResources':
-                return await runtime.listResources(server, { ...params.params, ...policy });
-              case 'readResource':
-                if (typeof params.uri !== 'string') throw new BrokerError('invalid_params', 'Resource URI required.');
-                return await runtime.readResource(server, params.uri, policy);
-              default:
-                throw new BrokerError('unknown_method', 'Unknown daemon operation.');
+              }
+              const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+              if (code === SdkErrorCode.ConnectionClosed || code === SdkErrorCode.NotConnected) {
+                target.state = 'disconnected';
+              }
+              if (error instanceof SdkHttpError) {
+                target.state = 'disconnected';
+                if (error.status === 404 && replayExpiredSession) return REPLAY_EXPIRED_SESSION;
+              }
+              if (code === SdkErrorCode.RequestTimeout || (error instanceof Error && error.message === 'Timeout')) {
+                target.uncertain = true;
+                throw new BrokerError(
+                  'operation_timeout',
+                  'Operation timed out; outcome unknown. It was not replayed and the connection was retained.'
+                );
+              }
+              if (isOAuthFlowError(error))
+                throw new BrokerError(
+                  'oauth_flow_error',
+                  'Authorization failed. Authenticate this server explicitly; the operation was not replayed.'
+                );
+              throw error;
             }
-          } catch (error) {
-            if (error instanceof BrokerError) throw error;
-            if (signal?.aborted) {
-              target.uncertain = true;
-              throw new BrokerError(
-                'operation_cancelled',
-                'The caller disconnected; cancellation was sent to the server, but the outcome is unknown. It was not replayed.'
-              );
-            }
-            const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
-            if (code === SdkErrorCode.ConnectionClosed || code === SdkErrorCode.NotConnected) {
-              target.state = 'disconnected';
-            }
-            if (error instanceof SdkHttpError) {
-              target.state = 'disconnected';
-              if (error.status === 404 && replayExpiredSession) return await attempt(false);
-            }
-            if (code === SdkErrorCode.RequestTimeout || (error instanceof Error && error.message === 'Timeout')) {
-              target.uncertain = true;
-              throw new BrokerError(
-                'operation_timeout',
-                'Operation timed out; outcome unknown. It was not replayed and the connection was retained.'
-              );
-            }
-            if (isOAuthFlowError(error))
-              throw new BrokerError(
-                'oauth_flow_error',
-                'Authorization failed. Authenticate this server explicitly; the operation was not replayed.'
-              );
-            throw error;
+          } finally {
+            release();
           }
         });
-      const run = () => attempt(true);
-      // Serialize individual calls, preserving the server's shared MCP session state.
+      const run = async () => {
+        const result = await attempt(true);
+        return result === REPLAY_EXPIRED_SESSION ? await attempt(false) : result;
+      };
       target.active++;
       clearTimeout(target.idleTimer);
-      const operation = target.serial.then(run, run);
-      target.serial = operation.catch(() => {});
+      // Calls share a connection concurrently; the browser owner keeps one call at a time.
+      const operation = chrome ? target.exclusive.then(run, run) : run();
+      if (chrome) target.exclusive = operation.catch(() => {});
       try {
         return await operation;
       } finally {
@@ -429,6 +423,48 @@ export class DaemonBroker {
         (entry) => !entry.active && !entry.uncertain && entry.state !== 'retirement-failed'
       )
     );
+  }
+  private async admit(target: Entry): Promise<() => void> {
+    for (;;) {
+      const lifecycle = target.serial;
+      await lifecycle;
+      if (target.serial !== lifecycle) continue;
+      if (target.state === 'retirement-failed')
+        throw (
+          target.retirementError ??
+          new BrokerError(
+            'transport_retirement_failed',
+            'Old transport retirement is unverified; no replacement was launched.'
+          )
+        );
+      if (target.state === 'disconnected' || target.state === 'idle') {
+        target.serial = lifecycle.then(() => this.reconnect(target));
+        continue;
+      }
+      const settled = Promise.withResolvers<void>();
+      target.running.add(settled.promise);
+      return () => {
+        target.running.delete(settled.promise);
+        settled.resolve();
+      };
+    }
+  }
+  private async reconnect(target: Entry): Promise<void> {
+    while (target.running.size > 0) await Promise.all(target.running);
+    if (target.state !== 'disconnected' && target.state !== 'idle') return;
+    try {
+      if (target.state !== 'idle') await this.retire(target);
+    } catch (error) {
+      target.state = 'retirement-failed';
+      target.retirementError = error;
+      return;
+    }
+    target.runtime = this.makeRuntime(target.definition, target.clientInfo);
+    target.connection = undefined;
+    target.processes = undefined;
+    target.uncertain = false;
+    target.generation++;
+    target.state = 'pending';
   }
   private async retire(entry: Entry): Promise<void> {
     await withRuntimeEnvironment(entry.definition.env ?? {}, async () => {

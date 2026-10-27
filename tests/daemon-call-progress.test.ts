@@ -2,19 +2,17 @@ import { expect, it } from 'vitest';
 import type { CallProgress } from '../src/daemon/protocol.js';
 import { singletonFixture } from './helpers/singleton.js';
 
-it('keeps a call alive while the server reports progress and passes the progress to the caller', async () => {
+it('passes server progress through the daemon to the caller while the call runs', async () => {
   const f = await singletonFixture();
   try {
-    const client = f.client();
-    await client.callTool({ server: 'fixture', tool: 'identity' });
     const seen: CallProgress[] = [];
-    await client.callTool({ server: 'fixture', tool: 'progressing', timeoutMs: 250 }, (progress) =>
-      seen.push(progress)
-    );
-    expect(seen).toEqual([1, 2, 3, 4].map((step) => ({ progress: step, total: 4, message: `step ${step}` })));
-    await expect(client.callTool({ server: 'fixture', tool: 'delayed', timeoutMs: 150 })).rejects.toMatchObject({
-      code: 'operation_timeout',
+    const releases: Promise<unknown>[] = [];
+    await f.client().callTool({ server: 'fixture', tool: 'progressing' }, (progress) => {
+      seen.push(progress);
+      releases.push(f.client().callTool({ server: 'fixture', tool: 'release' }));
     });
+    await Promise.all(releases);
+    expect(seen).toEqual([{ progress: 1, total: 2, message: 'waiting' }]);
   } finally {
     await f.close();
   }

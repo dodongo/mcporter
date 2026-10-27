@@ -27,21 +27,17 @@ async function waitFor(check: () => Promise<boolean>): Promise<void> {
   }
 }
 
-it('does not send a queued call whose caller disconnected', async () => {
+it('does not send a call whose caller disconnected while its connection started', async () => {
   const f = await singletonFixture();
   try {
     const client = f.client();
-    await client.callTool({ server: 'fixture', tool: 'identity' });
-    const slow = client.callTool({ server: 'fixture', tool: 'delayed' });
-    await new Promise((resolve) => setTimeout(resolve, 50));
     const sockets = captureNextSockets();
     const abandoned = client.callTool({ server: 'fixture', tool: 'identity' }).catch((error: unknown) => error);
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await waitFor(async () => f.host.status().servers.length > 0);
     vi.restoreAllMocks();
     for (const socket of sockets) socket.destroy(new Error('caller exited'));
     await abandoned;
-    await slow;
-    expect(fixtureResult(await client.callTool({ server: 'fixture', tool: 'identity' })).count).toBe(3);
+    expect(fixtureResult(await client.callTool({ server: 'fixture', tool: 'identity' })).count).toBe(1);
   } finally {
     await f.close();
   }

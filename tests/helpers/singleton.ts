@@ -29,8 +29,12 @@ import { StdioServerTransport } from '${pathToFileURL(require.resolve('@modelcon
 const id=randomUUID();let count=0;fs.appendFileSync(${JSON.stringify(path.join(root, 'instances'))},id+'\\n');
 ${options.exclusive ? `const lock=${JSON.stringify(path.join(root, 'exclusive.lock'))};fs.closeSync(fs.openSync(lock,'wx'));process.on('exit',()=>fs.unlinkSync(lock));` : ''}
 const server=new McpServer({name:'synthetic',version:'1',title:'Synthetic tools'}, {instructions:'Operate the synthetic fixture.'});
+let release;
+server.registerTool('release',{inputSchema:{}},async()=>{release();return {content:[{type:'text',text:'released'}]};});
 server.registerTool('progressing',{inputSchema:{}},async(_args,extra)=>{
- for(let step=1;step<=4;step++){await new Promise(r=>setTimeout(r,100));await extra.sendNotification({method:'notifications/progress',params:{progressToken:extra._meta.progressToken,progress:step,total:4,message:'step '+step}});}
+ const released=new Promise(r=>{release=r});
+ await extra.sendNotification({method:'notifications/progress',params:{progressToken:extra._meta.progressToken,progress:1,total:2,message:'waiting'}});
+ await released;
  return {content:[{type:'text',text:JSON.stringify({id,count,value:process.env.VALUE,cwd:process.cwd()})}]};
 });
 for(const name of ['identity','secret','delayed','application_error','disconnect'])server.registerTool(name,{inputSchema:{}},async(_args,extra)=>{

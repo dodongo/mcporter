@@ -82,7 +82,7 @@ it('does not schedule retirement or busy-loop while active/queued or after an un
   vi.useFakeTimers();
   const f = fixture();
   const held = Promise.withResolvers<string>();
-  f.callTool.mockReturnValueOnce(held.promise);
+  f.callTool.mockReturnValueOnce(held.promise).mockReturnValueOnce(held.promise);
   const first = f.invoke();
   const second = f.invoke();
   try {
