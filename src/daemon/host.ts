@@ -1,3 +1,4 @@
+import { SdkHttpError } from '@modelcontextprotocol/client';
 import { ChromeDevtoolsRelayDiscoveryError } from '../chrome-devtools-relay.js';
 import { idleTimerDelay } from './idle-timer.js';
 import fs from 'node:fs/promises';
@@ -26,6 +27,16 @@ export interface DaemonHostOptions {
 export interface DaemonHostHandle {
   close(): Promise<void>;
   status(): StatusResult;
+}
+
+const HTTP_BODY_DETAIL_LIMIT = 500;
+
+export function httpFailureDetail(error: unknown): string {
+  if (!(error instanceof SdkHttpError)) return '';
+  const status = [error.status, error.statusText].filter(Boolean).join(' ');
+  const body = typeof error.data?.text === 'string' ? error.data.text.replace(/\s+/g, ' ').trim() : '';
+  const excerpt = body.length > HTTP_BODY_DETAIL_LIMIT ? `${body.slice(0, HTTP_BODY_DETAIL_LIMIT)}…` : body;
+  return `, HTTP ${status}${excerpt ? `: ${excerpt}` : ''}`;
 }
 
 export async function runDaemonHost(options: DaemonHostOptions): Promise<DaemonHostHandle> {
@@ -153,7 +164,7 @@ export async function runDaemonHost(options: DaemonHostOptions): Promise<DaemonH
           error instanceof ChromeDevtoolsRelayDiscoveryError ||
           code === 'browser_owner_conflict'
             ? (error as Error).message
-            : `MCP operation failed (${code}); the request was not replayed.`;
+            : `MCP operation failed (${code}${httpFailureDetail(error)}); the request was not replayed.`;
         frames.write({
           id,
           ok: false,

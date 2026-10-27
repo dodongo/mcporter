@@ -8,7 +8,7 @@ import {
 import { MCPORTER_VERSION } from '../version.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
-import { SdkErrorCode } from '@modelcontextprotocol/client';
+import { SdkErrorCode, SdkHttpError } from '@modelcontextprotocol/client';
 import type { ServerDefinition } from '../config.js';
 import { createRuntime, type Runtime } from '../runtime.js';
 import type { ClientContext } from '../runtime/transport-types.js';
@@ -192,7 +192,7 @@ export class DaemonBroker {
         this.entries.set(key, entry);
       }
       const target = entry;
-      const run = () =>
+      const attempt = (replayExpiredSession: boolean): Promise<unknown> =>
         withRuntimeEnvironment(target.definition.env ?? {}, async () => {
           // Queued requests must still hold authority before any connection/recovery I/O.
           if (chrome) await this.owner.resolveIdentity(definition);
@@ -310,6 +310,10 @@ export class DaemonBroker {
             if (code === SdkErrorCode.ConnectionClosed || code === SdkErrorCode.NotConnected) {
               target.state = 'disconnected';
             }
+            if (error instanceof SdkHttpError) {
+              target.state = 'disconnected';
+              if (error.status === 404 && replayExpiredSession) return await attempt(false);
+            }
             if (code === SdkErrorCode.RequestTimeout || (error instanceof Error && error.message === 'Timeout')) {
               target.uncertain = true;
               throw new BrokerError(
@@ -325,6 +329,7 @@ export class DaemonBroker {
             throw error;
           }
         });
+      const run = () => attempt(true);
       // Serialize individual calls, preserving the server's shared MCP session state.
       target.active++;
       clearTimeout(target.idleTimer);

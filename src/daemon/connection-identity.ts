@@ -26,6 +26,11 @@ const BROKER_ENV = new Set([
   'MCPORTER_NO_FORCE_EXIT',
 ]);
 
+const HTTP_PROCESS_ENV =
+  /^(?:HOME|USERPROFILE|APPDATA|LOCALAPPDATA|XDG_[A-Z0-9_]+|MCPORTER_[A-Z0-9_]+|NODE_[A-Z0-9_]+|SSL_CERT_(?:FILE|DIR)|(?:HTTPS?|NO|ALL)_PROXY)$/i;
+const ENV_PLACEHOLDER = /\$\{([A-Za-z_][A-Za-z0-9_]*)/g;
+const ENV_DIRECT_PREFIX = '$env:';
+
 export interface ResolvedServerDefinition extends ServerDefinition {
   /** Resolved explicit overrides, before adding inherited launch environment. */
   readonly configuredEnv?: Record<string, string>;
@@ -122,7 +127,7 @@ export function connectionIdentity(definition: ResolvedServerDefinition): string
   } = definition;
   // HTTP cached credentials are alias-owned even when auth was inferred on first use.
   const credentialOwner = definition.auth || definition.command.kind === 'http' ? name : undefined;
-  const env = { ...definition.env };
+  const env = definition.command.kind === 'http' ? httpTransportEnv(definition) : { ...definition.env };
   const chrome = isExistingChromeDefinition(definition);
   if (chrome) {
     env.MCPORTER_CHROME_DEVTOOLS_RELAY_POLICY = resolveChromeDevtoolsRelayPolicy(definition.chromeDevtoolsRelay, env);
@@ -143,6 +148,25 @@ export function connectionIdentity(definition: ResolvedServerDefinition): string
       })
     )
     .digest('hex');
+}
+
+function httpTransportEnv(definition: ResolvedServerDefinition): Record<string, string> {
+  const { env, configuredEnv, ...rest } = definition;
+  const referenced = new Set(Object.keys(configuredEnv ?? {}));
+  if (definition.oauthCommand) referenced.add('PATH');
+  const visit = (value: unknown, key: string): void => {
+    if (value instanceof URL) visit(value.href, key);
+    else if (typeof value === 'string') {
+      if (key.endsWith('Env')) referenced.add(value);
+      if (value.startsWith(ENV_DIRECT_PREFIX)) referenced.add(value.slice(ENV_DIRECT_PREFIX.length));
+      for (const match of value.matchAll(ENV_PLACEHOLDER)) referenced.add(match[1]!);
+    } else if (value && typeof value === 'object')
+      for (const [childKey, child] of Object.entries(value)) visit(child, childKey);
+  };
+  visit(rest, '');
+  return Object.fromEntries(
+    Object.entries(env ?? {}).filter(([key]) => referenced.has(key) || HTTP_PROCESS_ENV.test(key))
+  );
 }
 
 /** Plain launches own their browser; connection selectors and ambiguous wrappers do not prove isolation. */
