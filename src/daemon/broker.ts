@@ -147,6 +147,8 @@ export class DaemonBroker {
       );
     if (params.timeoutMs !== undefined && (!Number.isFinite(params.timeoutMs) || params.timeoutMs <= 0))
       throw new BrokerError('invalid_params', 'Invalid timeout.');
+    if (params.deadlineAt !== undefined && !Number.isFinite(params.deadlineAt))
+      throw new BrokerError('invalid_params', 'Invalid deadline.');
     const chrome = isExistingChromeDefinition(viewDefinition);
     if (chrome && JSON.stringify(view.clientInfo) !== JSON.stringify({ name: 'mcporter', version: MCPORTER_VERSION }))
       throw new BrowserOwnerConflict('existing Chrome requires the canonical MCP client identity');
@@ -282,12 +284,19 @@ export class DaemonBroker {
                   serverInfo: info ? { name: info.name, version: info.version, title: info.title } : undefined,
                 };
               }
-              case 'callTool':
+              case 'callTool': {
+                const remainingMs = params.deadlineAt === undefined ? undefined : params.deadlineAt - Date.now();
+                if (remainingMs !== undefined && remainingMs <= 0)
+                  throw new BrokerError(
+                    'operation_expired',
+                    'The call reached its deadline while queued; it was not sent to the server.'
+                  );
                 return await runtime.callTool(server, params.tool, {
                   args: params.args,
-                  timeoutMs: params.timeoutMs,
+                  timeoutMs: remainingMs ?? params.timeoutMs,
                   disableOAuth: policy.disableOAuth,
                 });
+              }
               case 'listTools':
                 return filterTools(
                   await runtime.listTools(server, {

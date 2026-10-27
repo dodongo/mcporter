@@ -93,7 +93,8 @@ export class DaemonClient {
   }
 
   async callTool(params: CallToolParams): Promise<unknown> {
-    return this.invoke('callTool', params, params.timeoutMs);
+    const deadlineAt = params.timeoutMs === undefined ? undefined : Date.now() + params.timeoutMs;
+    return this.invoke('callTool', { ...params, deadlineAt }, params.timeoutMs);
   }
 
   async listTools(params: ListToolsParams): Promise<unknown> {

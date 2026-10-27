@@ -45,19 +45,16 @@ it('separates generic idle policies and retains unknown outcomes without replay 
   let pending: Promise<unknown> = Promise.resolve();
   try {
     const retained = fixtureResult(await f.client().callTool({ server: 'fixture', tool: 'identity' }));
-    const timed = f.client({ ...f.definition, lifecycle: { mode: 'keep-alive', idleTimeoutMs: 10 } });
-    const calls = [
-      timed.callTool({ server: 'fixture', tool: 'identity' }),
-      expect(timed.callTool({ server: 'fixture', tool: 'delayed', timeoutMs: 20 })).rejects.toMatchObject({
-        code: 'operation_timeout',
-      }),
-    ];
-    pending = Promise.allSettled(calls);
-    const [initial] = await Promise.all(calls);
-    const other = fixtureResult(initial);
+    const timed = f.client({ ...f.definition, lifecycle: { mode: 'keep-alive', idleTimeoutMs: 100 } });
+    const other = fixtureResult(await timed.callTool({ server: 'fixture', tool: 'identity' }));
+    const timedOut = expect(
+      timed.callTool({ server: 'fixture', tool: 'delayed', timeoutMs: 200 })
+    ).rejects.toMatchObject({ code: 'operation_timeout' });
+    pending = timedOut;
+    await timedOut;
     expect(other.id).not.toBe(retained.id);
     await pause(300);
-    expect(f.host.status().servers.find((entry) => entry.idleTimeoutMs === 10)?.idleBlocked).toBe('unknown-outcome');
+    expect(f.host.status().servers.find((entry) => entry.idleTimeoutMs === 100)?.idleBlocked).toBe('unknown-outcome');
     expect(fixtureResult(await timed.callTool({ server: 'fixture', tool: 'identity' })).id).toBe(other.id);
     expect(fixtureResult(await f.client().callTool({ server: 'fixture', tool: 'identity' })).id).toBe(retained.id);
     expect((await fs.readFile(path.join(f.root, 'effects'), 'utf8')).trim().split('\n')).toEqual(['once']);

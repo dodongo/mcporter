@@ -134,6 +134,7 @@ export interface CallToolParams {
   readonly tool: string;
   readonly args?: Record<string, unknown>;
   readonly timeoutMs?: number;
+  readonly deadlineAt?: number;
   readonly disableOAuth?: boolean;
 }
 
