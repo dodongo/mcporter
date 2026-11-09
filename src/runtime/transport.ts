@@ -5,8 +5,12 @@ import { withRuntimeEnvironment } from './environment.js';
 import { isExistingChromeDefinition } from '../daemon/connection-identity.js';
 import {
   Client,
+  type CacheKey,
+  type CacheScope,
   type ClientOptions,
   DEFAULT_REQUEST_TIMEOUT_MSEC,
+  InMemoryResponseCacheStore,
+  MAX_CACHE_TTL_MS,
   SdkError,
   SdkErrorCode,
   type Transport,
@@ -71,6 +75,12 @@ const wrapRecordTransport: WrapRecordTransport = <TTransport extends Transport>(
 
 const LIST_MAX_PAGES = 100;
 
+class ToolListCacheStore extends InMemoryResponseCacheStore {
+  override set(key: CacheKey, entry: { value: string; expiresAt?: number; scope?: CacheScope }): number {
+    return super.set(key, key.method === 'tools/list' ? { ...entry, expiresAt: Date.now() + MAX_CACHE_TTL_MS } : entry);
+  }
+}
+
 function resolveStdioProbeTimeoutMs(): number {
   const raw = process.env.MCPORTER_STDIO_PROBE_TIMEOUT_MS;
   if (!raw || !/^[1-9]\d*$/.test(raw)) return DEFAULT_REQUEST_TIMEOUT_MSEC;
@@ -109,6 +119,7 @@ function createClient(
     jsonSchemaValidator: createOutputSchemaValidator(),
     capabilities: { elicitation: { form: {}, url: {} } },
     listMaxPages: LIST_MAX_PAGES,
+    responseCacheStore: new ToolListCacheStore(),
     versionNegotiation: {
       mode,
       ...(options.stdio && mode !== 'legacy' ? { probe: { timeoutMs: resolveStdioProbeTimeoutMs() } } : {}),

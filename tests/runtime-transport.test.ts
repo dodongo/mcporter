@@ -7,6 +7,7 @@ import {
   StreamableHTTPClientTransport,
 } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { InMemoryTransport, McpServer } from '@modelcontextprotocol/server';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -117,6 +118,40 @@ describe('createClientContext (HTTP)', () => {
 
     expect(internal._capabilities.elicitation).toEqual({ form: {}, url: {} });
     expect(internal._getRequestHandler('elicitation/create')).toBeTypeOf('function');
+  });
+
+  it('serves the tool list from memory until the server reports a change', async () => {
+    const server = new McpServer({ name: 'tool-list-cache-test', version: '1.0.0' });
+    server.registerTool('first', {}, async () => ({ content: [] }));
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const listRequests: string[] = [];
+    const send = clientTransport.send.bind(clientTransport);
+    clientTransport.send = async (message, options) => {
+      if ('method' in message && message.method === 'tools/list') listRequests.push(message.method);
+      await send(message, options);
+    };
+    await server.connect(serverTransport);
+    const connect = vi.spyOn(Client.prototype, 'connect').mockImplementationOnce(function (this: Client) {
+      connect.mockRestore();
+      return this.connect(clientTransport);
+    });
+
+    const context = await createClientContext(stubHttpDefinition('https://example.com/mcp'), logger, clientInfo, {
+      maxOAuthAttempts: 0,
+    });
+    try {
+      const names = async () => (await context.client.listTools()).tools.map((tool) => tool.name);
+      expect(await names()).toEqual(['first']);
+      expect(await names()).toEqual(['first']);
+      expect(listRequests).toHaveLength(1);
+
+      server.registerTool('second', {}, async () => ({ content: [] }));
+      await vi.waitFor(async () => expect(await names()).toEqual(['first', 'second']));
+      expect(listRequests).toHaveLength(2);
+    } finally {
+      await context.client.close();
+      await server.close();
+    }
   });
 
   it.each([
