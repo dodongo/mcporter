@@ -11,6 +11,7 @@ import type { ServerDefinition } from '../config.js';
 import { stableJsonStringify } from '../stable-json.js';
 import { resolveCommandArgument, resolveCommandArguments } from '../runtime/utils.js';
 import { childEnvWithoutVaultSecrets } from '../oauth-vault-encryption.js';
+import { inheritedServerEnv } from '../inherited-env.js';
 
 // These are broker controls, never child inputs. Other environment differences remain meaningful.
 const BROKER_ENV = new Set([
@@ -47,7 +48,10 @@ export async function effectiveDefinition(
   // reaches any daemon-managed child; an explicit `env` entry still wins.
   const env = Object.fromEntries(
     Object.entries(
-      resolveChromeDevtoolsRelayEnvironment(definition.env, childEnvWithoutVaultSecrets(inherited))
+      inheritedServerEnv(
+        definition,
+        resolveChromeDevtoolsRelayEnvironment(definition.env, childEnvWithoutVaultSecrets(inherited))
+      )
     ).filter(([key, value]) => value !== undefined && !BROKER_ENV.has(key))
   ) as Record<string, string>;
   const configuredEnv = Object.fromEntries(

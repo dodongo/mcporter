@@ -69,6 +69,7 @@ export function normalizeServerEntry(
   const logging = normalizeLogging(raw.logging);
   const allowedTools = raw.allowedTools ?? raw.allowed_tools;
   const blockedTools = raw.blockedTools ?? raw.blocked_tools;
+  const inheritEnv = raw.inheritEnv;
 
   const defaultedOauthCommand =
     !oauthCommand && name.toLowerCase() === 'gmail' && command.kind === 'stdio'
@@ -102,6 +103,7 @@ export function normalizeServerEntry(
     logging,
     ...(allowedTools !== undefined ? { allowedTools: [...allowedTools] } : {}),
     ...(blockedTools !== undefined ? { blockedTools: [...blockedTools] } : {}),
+    ...(inheritEnv !== undefined ? { inheritEnv: [...inheritEnv] } : {}),
   };
 }
 

@@ -390,6 +390,13 @@
             "items": {
               "type": "string"
             }
+          },
+          "inheritEnv": {
+            "description": "Only these ambient environment variables reach the server; explicit env entries still apply",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "additionalProperties": false,

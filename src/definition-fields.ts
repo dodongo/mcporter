@@ -18,6 +18,7 @@ const SHARED_DEFINITION_FIELDS = [
   'httpFetch',
   'allowedTools',
   'blockedTools',
+  'inheritEnv',
 ] as const satisfies readonly (keyof ServerDefinition)[];
 
 type SharedDefinitionField = (typeof SHARED_DEFINITION_FIELDS)[number];

@@ -91,6 +91,10 @@ export function printServerSummary(definition: ServerDefinition): void {
     const rendered = definition.blockedTools.length > 0 ? definition.blockedTools.join(', ') : '<none>';
     console.log(`  ${label('Blocked tools')}: ${rendered}`);
   }
+  if (definition.inheritEnv !== undefined) {
+    const rendered = definition.inheritEnv.length > 0 ? definition.inheritEnv.join(', ') : '<none>';
+    console.log(`  ${label('Inherited env')}: ${rendered}`);
+  }
 }
 
 export function printImportSummary(importServers: ServerDefinition[]): void {

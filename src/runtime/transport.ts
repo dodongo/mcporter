@@ -1,5 +1,6 @@
 import { DEFAULT_INHERITED_ENV_VARS } from '@modelcontextprotocol/client/stdio';
 import { childEnvWithoutVaultSecrets } from '../oauth-vault-encryption.js';
+import { inheritedServerEnv } from '../inherited-env.js';
 import { withRuntimeEnvironment } from './environment.js';
 import { isExistingChromeDefinition } from '../daemon/connection-identity.js';
 import {
@@ -302,7 +303,10 @@ export async function createClientContext(
   // definition that sets them explicitly in `env` still wins.
   const env = isBrokerDefinition(definition)
     ? definition.env
-    : resolveChromeDevtoolsRelayEnvironment(definition.env, childEnvWithoutVaultSecrets(process.env));
+    : inheritedServerEnv(
+        definition,
+        resolveChromeDevtoolsRelayEnvironment(definition.env, childEnvWithoutVaultSecrets(process.env))
+      );
   return withRuntimeEnvironment(env ?? {}, async () => {
     const activeDefinition = await applyCachedAuthIfAvailable(
       { ...definition, env: env as Record<string, string> },

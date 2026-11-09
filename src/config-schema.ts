@@ -195,6 +195,10 @@ export const RawEntrySchema = z
     allowed_tools: ToolNamesSchema.optional().describe('Only these exact tool names are exposed (snake_case)'),
     blockedTools: ToolNamesSchema.optional().describe('These exact tool names are hidden and blocked (camelCase)'),
     blocked_tools: ToolNamesSchema.optional().describe('These exact tool names are hidden and blocked (snake_case)'),
+    inheritEnv: z
+      .array(z.string())
+      .optional()
+      .describe('Only these ambient environment variables reach the server; explicit env entries still apply'),
   })
   .superRefine((entry, ctx) => {
     const hasAllowed = entry.allowedTools !== undefined || entry.allowed_tools !== undefined;
@@ -319,6 +323,8 @@ export interface ServerDefinition {
   readonly allowedTools?: readonly string[];
   /** When specified, these exact tool names are hidden and blocked. Cannot be combined with allowedTools. */
   readonly blockedTools?: readonly string[];
+  /** When specified, only these ambient environment variable names reach the server; explicit `env` entries still apply. */
+  readonly inheritEnv?: readonly string[];
 }
 
 export interface LoadConfigOptions {

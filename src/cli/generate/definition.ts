@@ -242,6 +242,7 @@ export function normalizeDefinition(def: DefinitionInput): ServerDefinition {
   if (allowedTools !== undefined && blockedTools !== undefined) {
     throw new Error(`Server definition '${name}' cannot specify both allowedTools and blockedTools.`);
   }
+  const inheritEnv = getOptionalStringArray(record.inheritEnv, 'inheritEnv');
   const shared = (
     command: ServerDefinition['command']
   ): Omit<ServerDefinition, 'name' | 'description' | 'command'> => ({
@@ -267,6 +268,7 @@ export function normalizeDefinition(def: DefinitionInput): ServerDefinition {
     logging,
     ...(allowedTools !== undefined ? { allowedTools } : {}),
     ...(blockedTools !== undefined ? { blockedTools } : {}),
+    ...(inheritEnv !== undefined ? { inheritEnv } : {}),
   });
 
   const commandValue = def.command;
