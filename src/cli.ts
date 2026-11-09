@@ -405,7 +405,7 @@ async function closeRuntimeAfterCommand(
     const shouldForceExit = !disableForceExit || process.env.MCPORTER_FORCE_EXIT === '1';
     const scheduleForcedExit = () => {
       if (shouldForceExit) {
-        setTimeout(flushStdioThenForceExit, FORCE_EXIT_GRACE_MS);
+        setTimeout(flushStdioThenForceExit, FORCE_EXIT_GRACE_MS).unref();
       }
     };
     if (DEBUG_HANG) {

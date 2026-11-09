@@ -36,12 +36,27 @@ function runCli(args: string[], configPath: string): Promise<{ stdout: string; s
 describe('mcporter forced exit behavior', () => {
   let tempDir: string;
   let configPath: string;
+  let emptyConfigPath: string;
+  let exitProbePath: string;
 
   beforeAll(async () => {
     await ensureDistBuilt(CLI_ENTRY);
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mcporter-force-exit-'));
     const serverScriptPath = path.join(tempDir, 'force-exit-server.mjs');
     configPath = path.join(tempDir, 'config.json');
+    emptyConfigPath = path.join(tempDir, 'empty-config.json');
+    exitProbePath = path.join(tempDir, 'exit-probe.mjs');
+    await fs.writeFile(emptyConfigPath, JSON.stringify({ mcpServers: {}, imports: [] }), 'utf8');
+    await fs.writeFile(
+      exitProbePath,
+      `const exit = process.exit.bind(process);
+process.exit = (code) => {
+  process.stderr.write('forced exit\\n');
+  return exit(code);
+};
+`,
+      'utf8'
+    );
     const longDescription = 'Large schema tool description. '.repeat(30);
 
     await fs.writeFile(
@@ -120,6 +135,23 @@ await server.connect(transport);
       const result = await runCli(['call', 'force-exit.fail'], configPath);
       expect(result.code).toBe(1);
       expect(result.stdout).toContain('expected failure');
+      expect(result.stderr).toBe('');
+    },
+    budget(20_000)
+  );
+
+  it(
+    'exits on its own, without waiting out the forced-exit grace, when no handle lingers',
+    async () => {
+      const result = await new Promise<{ stderr: string; code: number }>((resolve) => {
+        execFile(
+          process.execPath,
+          ['--import', pathToFileURL(exitProbePath).href, CLI_ENTRY, '--config', emptyConfigPath, 'list', '--json'],
+          { cwd: process.cwd(), env: process.env },
+          (error, _stdout, stderr) => resolve({ stderr, code: typeof error?.code === 'number' ? error.code : 0 })
+        );
+      });
+      expect(result.code).toBe(0);
       expect(result.stderr).toBe('');
     },
     budget(20_000)
