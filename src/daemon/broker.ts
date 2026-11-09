@@ -398,9 +398,9 @@ export class DaemonBroker {
     };
   }
   async close(): Promise<void> {
-    this.draining = true;
     if (this.activeRequests > 0)
       throw new BrokerError('active_calls', 'Active calls are still running; wait for completion before stopping.');
+    this.draining = true;
     for (const entry of this.entries.values()) {
       clearTimeout(entry.idleTimer);
       await entry.serial;
