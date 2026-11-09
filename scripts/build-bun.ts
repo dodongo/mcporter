@@ -103,7 +103,7 @@ async function main(): Promise<void> {
     buildArgs.push('--minify');
   }
   if (options.bytecode) {
-    buildArgs.push('--bytecode');
+    buildArgs.push('--bytecode', '--format=esm');
   }
   if (options.target) {
     buildArgs.push('--target', options.target);
